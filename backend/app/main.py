@@ -25,6 +25,24 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing database schema...")
     Base.metadata.create_all(bind=engine)
     logger.info("Database schema initialized successfully.")
+
+    # Auto-seed database if empty so judges and live deployments have instant demo data
+    try:
+        from app.db.session import SessionLocal
+        from app.models.participant import Participant
+        from app.db.seed_demo import seed_database
+
+        with SessionLocal() as db:
+            p_count = db.query(Participant).count()
+            if p_count == 0:
+                logger.info("Database is empty (0 participants). Triggering automatic demo seeding...")
+                seed_database(db=db, run_simulation=True)
+                logger.info("Automatic demo seeding completed successfully.")
+            else:
+                logger.info(f"Database already populated ({p_count} participants found). Skipping auto-seed.")
+    except Exception as e:
+        logger.warning(f"Auto-seed check encountered an issue (non-fatal): {e}")
+
     yield
     logger.info("Application shutting down.")
 
@@ -42,7 +60,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.BACKEND_CORS_ORIGINS,
-    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?|https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -92,3 +92,43 @@ def test_full_dating_and_ranking_flow(client):
     target_ids = [r["target_participant_id"] for r in rankings_data["rankings"]]
     assert part_b["id"] in target_ids
 
+def test_incompatible_gender_date_rejected_with_400(client):
+    uid = uuid.uuid4().hex[:6]
+    # Ingest two female participants who both state target_gender = Male
+    resp_1 = client.post("/api/v1/participants", json={
+        "name": f"Shreya {uid}",
+        "age": 27,
+        "gender": "Female",
+        "target_gender": "Male",
+        "location": "Mumbai",
+        "linkedin_url": f"https://www.linkedin.com/in/shreya-{uid}",
+        "instagram_url": f"https://www.instagram.com/shreya_{uid}",
+        "consent_confirmed": True
+    })
+    part_1 = resp_1.json()
+
+    resp_2 = client.post("/api/v1/participants", json={
+        "name": f"Priya {uid}",
+        "age": 26,
+        "gender": "Female",
+        "target_gender": "Male",
+        "location": "Bengaluru",
+        "linkedin_url": f"https://www.linkedin.com/in/priya-{uid}",
+        "instagram_url": f"https://www.instagram.com/priya_{uid}",
+        "consent_confirmed": True
+    })
+    part_2 = resp_2.json()
+
+    # Admin verifies both
+    for pid in [part_1["id"], part_2["id"]]:
+        client.post(f"/api/v1/participants/{pid}/verify", headers={"X-Admin-Key": settings.ADMIN_API_KEY})
+
+    # Attempt to pair them -> must return 400 with Gender preference mismatch, preventing 0-turn zombie session
+    date_resp = client.post("/api/v1/dates", json={
+        "participant_a_id": part_1["id"],
+        "participant_b_id": part_2["id"],
+        "max_turns": 4
+    })
+    assert date_resp.status_code == 400
+    assert "gender preference mismatch" in date_resp.json()["detail"].lower()
+

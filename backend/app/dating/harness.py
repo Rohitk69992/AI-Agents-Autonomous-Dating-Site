@@ -48,24 +48,29 @@ EVALUATION_SCHEMA = {
 def check_eligibility(participant_a: Participant, participant_b: Participant) -> Tuple[bool, Optional[str]]:
     if participant_a.id == participant_b.id:
         return False, "Cannot date self."
-    if participant_a.consent_status not in ("consented", "verified"):
-        return False, f"{participant_a.name} has not consented to agent representation."
-    if participant_b.consent_status not in ("consented", "verified"):
-        return False, f"{participant_b.name} has not consented to agent representation."
     if participant_a.status == "withdrawn" or participant_b.status == "withdrawn":
-        return False, "One or both participants have withdrawn their profile."
+        return False, "One or both participants have withdrawn their profile and are not eligible."
     if not getattr(participant_a, "simulation_eligible", True):
         return False, f"{participant_a.name} is not currently eligible for dating simulations."
     if not getattr(participant_b, "simulation_eligible", True):
         return False, f"{participant_b.name} is not currently eligible for dating simulations."
+    if participant_a.consent_status not in ("consented", "verified"):
+        return False, f"{participant_a.name} has not verified consent and is not eligible for agent representation."
+    if participant_b.consent_status not in ("consented", "verified"):
+        return False, f"{participant_b.name} has not verified consent and is not eligible for agent representation."
     
-    # Optional gender preference check if explicitly specified
+    # Gender preference check if explicitly specified
+    open_targets = {"any", "all", "everyone", "open"}
     if participant_a.target_gender and participant_b.gender:
-        if participant_a.target_gender.lower() != participant_b.gender.lower() and participant_a.target_gender.lower() != "any":
-            return False, f"Gender preference mismatch for {participant_a.name}."
+        tg_a = participant_a.target_gender.lower().strip()
+        g_b = participant_b.gender.lower().strip()
+        if tg_a not in open_targets and tg_a != g_b:
+            return False, f"Gender preference mismatch: {participant_a.name} prefers {participant_a.target_gender}, but {participant_b.name} is {participant_b.gender}."
     if participant_b.target_gender and participant_a.gender:
-        if participant_b.target_gender.lower() != participant_a.gender.lower() and participant_b.target_gender.lower() != "any":
-            return False, f"Gender preference mismatch for {participant_b.name}."
+        tg_b = participant_b.target_gender.lower().strip()
+        g_a = participant_a.gender.lower().strip()
+        if tg_b not in open_targets and tg_b != g_a:
+            return False, f"Gender preference mismatch: {participant_b.name} prefers {participant_b.target_gender}, but {participant_a.name} is {participant_a.gender}."
 
     return True, None
 

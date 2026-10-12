@@ -95,45 +95,60 @@ class GeminiLLMProvider(BaseLLMProvider):
                 f"Do NOT include markdown formatting outside the JSON."
             )
 
-        # Retry logic with exponential backoff
+        # Retry logic with exponential backoff and model fallback (e.g. gemini-2.5-flash -> gemini-1.5-flash)
         last_error = None
-        for attempt in range(3):
-            try:
-                import google.generativeai as genai
-                model = genai.GenerativeModel(
-                    model_name=self.model_name,
-                    generation_config={
-                        "temperature": temperature,
-                        "max_output_tokens": max_tokens,
-                    }
-                )
-                response = model.generate_content(prompt_combined)
-                latency_ms = int((time.time() - start_time) * 1000)
-                
-                content = response.text or ""
-                structured_data = None
-                if response_schema:
-                    structured_data = self._extract_json(content)
+        models_to_try = [self.model_name]
+        if self.model_name != "gemini-1.5-flash":
+            models_to_try.append("gemini-1.5-flash")
 
-                # Token count estimate (1 char ~ 0.25 tokens)
-                tokens_in = len(prompt_combined) // 4
-                tokens_out = len(content) // 4
+        for current_model_name in models_to_try:
+            for attempt in range(2):
+                try:
+                    import google.generativeai as genai
+                    model = genai.GenerativeModel(
+                        model_name=current_model_name,
+                        generation_config={
+                            "temperature": temperature,
+                            "max_output_tokens": max_tokens,
+                        }
+                    )
+                    response = model.generate_content(prompt_combined)
+                    latency_ms = int((time.time() - start_time) * 1000)
+                    
+                    content = response.text or ""
+                    structured_data = None
+                    if response_schema:
+                        structured_data = self._extract_json(content)
 
-                return LLMResponse(
-                    content=content,
-                    structured_data=structured_data,
-                    tokens_input=tokens_in,
-                    tokens_output=tokens_out,
-                    latency_ms=latency_ms,
-                    model=self.model_name,
-                    provider="gemini"
-                )
-            except Exception as e:
-                last_error = e
-                logger.warning(f"Gemini API attempt {attempt + 1} failed: {e}")
-                time.sleep(1.0 * (2 ** attempt))
+                    # Extract actual token counts from response metadata if available
+                    tokens_in = len(prompt_combined) // 4
+                    tokens_out = len(content) // 4
+                    try:
+                        if hasattr(response, "usage_metadata") and response.usage_metadata:
+                            prompt_tokens = getattr(response.usage_metadata, "prompt_token_count", None)
+                            cand_tokens = getattr(response.usage_metadata, "candidates_token_count", None)
+                            if prompt_tokens is not None:
+                                tokens_in = prompt_tokens
+                            if cand_tokens is not None:
+                                tokens_out = cand_tokens
+                    except Exception as meta_err:
+                        logger.debug(f"Could not read usage_metadata: {meta_err}")
 
-        raise RuntimeError(f"Gemini generation failed after 3 attempts: {last_error}")
+                    return LLMResponse(
+                        content=content,
+                        structured_data=structured_data,
+                        tokens_input=tokens_in,
+                        tokens_output=tokens_out,
+                        latency_ms=latency_ms,
+                        model=current_model_name,
+                        provider="gemini"
+                    )
+                except Exception as e:
+                    last_error = e
+                    logger.warning(f"Gemini API attempt with {current_model_name} (attempt {attempt + 1}) failed: {e}")
+                    time.sleep(1.0 * (2 ** attempt))
+
+        raise RuntimeError(f"Gemini generation failed after attempts across {models_to_try}: {last_error}")
 
     def _extract_json(self, text: str) -> Optional[Dict[str, Any]]:
         try:

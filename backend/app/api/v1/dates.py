@@ -11,7 +11,7 @@ from app.schemas.dating import (
     StartDatingSessionRequest, DatingSessionResponse,
     ConversationMessageResponse, AgentEvaluationResponse
 )
-from app.dating.harness import execute_dating_session
+from app.dating.harness import execute_dating_session, check_eligibility
 from app.ranking.engine import calculate_rankings_for_participant
 
 router = APIRouter(prefix="/dates", tags=["Dating Sessions"])
@@ -26,10 +26,10 @@ def start_dating_session(
     if not p_a or not p_b:
         raise HTTPException(status_code=404, detail="One or both participants not found.")
 
-    if p_a.status == "withdrawn" or p_b.status == "withdrawn":
-        raise HTTPException(status_code=400, detail="Cannot simulate dates with withdrawn participants.")
-    if not getattr(p_a, "simulation_eligible", True) or not getattr(p_b, "simulation_eligible", True):
-        raise HTTPException(status_code=400, detail="One or both participants are not currently eligible for dating simulations.")
+    # Pre-validate mutual eligibility (consent, withdrawal, gender preferences, simulation eligibility)
+    eligible, reason = check_eligibility(p_a, p_b)
+    if not eligible:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=reason)
 
     # Create dating session record
     session = DatingSession(

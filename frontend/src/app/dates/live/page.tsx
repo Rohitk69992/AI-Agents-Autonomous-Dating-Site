@@ -7,11 +7,42 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 
+function checkPairEligibility(pA: any, pB: any): { eligible: boolean; reason?: string } {
+  if (!pA || !pB) return { eligible: false, reason: "Select two distinct participants." };
+  if (pA.id === pB.id) return { eligible: false, reason: "Cannot date self." };
+  if (pA.status === "withdrawn") return { eligible: false, reason: `${pA.name} has withdrawn their profile.` };
+  if (pB.status === "withdrawn") return { eligible: false, reason: `${pB.name} has withdrawn their profile.` };
+  if (pA.consent_status !== "consented" && pA.consent_status !== "verified") {
+    return { eligible: false, reason: `${pA.name} has not verified consent.` };
+  }
+  if (pB.consent_status !== "consented" && pB.consent_status !== "verified") {
+    return { eligible: false, reason: `${pB.name} has not verified consent.` };
+  }
+  if (pA.simulation_eligible === false) return { eligible: false, reason: `${pA.name} is not simulation eligible.` };
+  if (pB.simulation_eligible === false) return { eligible: false, reason: `${pB.name} is not simulation eligible.` };
+
+  const openTargets = ["any", "all", "everyone", "open"];
+  const tgA = pA.target_gender?.toLowerCase()?.trim();
+  const gB = pB.gender?.toLowerCase()?.trim();
+  if (tgA && gB && !openTargets.includes(tgA) && tgA !== gB) {
+    return { eligible: false, reason: `Gender mismatch: ${pA.name} seeks ${pA.target_gender}, but ${pB.name} is ${pB.gender}.` };
+  }
+
+  const tgB = pB.target_gender?.toLowerCase()?.trim();
+  const gA = pA.gender?.toLowerCase()?.trim();
+  if (tgB && gA && !openTargets.includes(tgB) && tgB !== gA) {
+    return { eligible: false, reason: `Gender mismatch: ${pB.name} seeks ${pB.target_gender}, but ${pA.name} is ${pA.gender}.` };
+  }
+
+  return { eligible: true };
+}
+
 export default function LiveDatingSimulationPage() {
   const [participants, setParticipants] = useState<any[]>([]);
   const [partAId, setPartAId] = useState("");
   const [partBId, setPartBId] = useState("");
   const [maxTurns, setMaxTurns] = useState(6);
+  const [onlyCompatible, setOnlyCompatible] = useState(true);
 
   const [simulating, setSimulating] = useState(false);
   const [session, setSession] = useState<any>(null);
@@ -20,18 +51,63 @@ export default function LiveDatingSimulationPage() {
 
   useEffect(() => {
     api.getParticipants({ limit: 50 }).then((data) => {
-      setParticipants(data || []);
-      if (data && data.length >= 2) {
-        setPartAId(data[0].id);
-        setPartBId(data[1].id);
+      const list = data || [];
+      setParticipants(list);
+      if (list.length >= 2) {
+        // Find default compatible pair: prioritize Aarav & Ananya or first mutually compatible pair
+        let foundA = list[0].id;
+        let foundB = list[1].id;
+
+        const demo1 = list.find((p: any) => p.name?.includes("Aarav"));
+        const demo2 = list.find((p: any) => p.name?.includes("Ananya"));
+        if (demo1 && demo2 && checkPairEligibility(demo1, demo2).eligible) {
+          foundA = demo1.id;
+          foundB = demo2.id;
+        } else {
+          let matched = false;
+          for (let i = 0; i < list.length && !matched; i++) {
+            for (let j = 0; j < list.length && !matched; j++) {
+              if (i !== j && checkPairEligibility(list[i], list[j]).eligible) {
+                foundA = list[i].id;
+                foundB = list[j].id;
+                matched = true;
+              }
+            }
+          }
+        }
+        setPartAId(foundA);
+        setPartBId(foundB);
       }
     });
   }, []);
+
+  const partA = participants.find((p) => p.id === partAId);
+  const partB = participants.find((p) => p.id === partBId);
+
+  const candidatesForB = participants.filter((p) => {
+    if (p.id === partAId) return false;
+    if (onlyCompatible && partA) {
+      return checkPairEligibility(partA, p).eligible;
+    }
+    return true;
+  });
+
+  useEffect(() => {
+    if (candidatesForB.length > 0 && !candidatesForB.some((p) => p.id === partBId)) {
+      setPartBId(candidatesForB[0].id);
+    }
+  }, [partAId, onlyCompatible, candidatesForB, partBId]);
+
+  const eligibility = checkPairEligibility(partA, partB);
 
   const handleStartSimulation = async () => {
     if (!partAId || !partBId) return;
     if (partAId === partBId) {
       setErrorMsg("Please select two distinct participants for the simulated date.");
+      return;
+    }
+    if (!eligibility.eligible) {
+      setErrorMsg(eligibility.reason || "Selected participants are incompatible.");
       return;
     }
 
@@ -57,9 +133,6 @@ export default function LiveDatingSimulationPage() {
   const toggleThought = (turn: number) => {
     setExpandedThoughts((prev) => ({ ...prev, [turn]: !prev[turn] }));
   };
-
-  const partA = participants.find((p) => p.id === partAId);
-  const partB = participants.find((p) => p.id === partBId);
 
   return (
     <div className="max-w-5xl mx-auto space-y-8">
@@ -91,7 +164,7 @@ export default function LiveDatingSimulationPage() {
             >
               {participants.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name} ({p.location || "California"}) {p.is_synthetic ? "• Synthetic" : "• Verified"}
+                  {p.name} ({p.gender || "Open"}, seeks {p.target_gender || "Open"}) &bull; {p.location || "India"}
                 </option>
               ))}
             </select>
@@ -104,19 +177,30 @@ export default function LiveDatingSimulationPage() {
 
           {/* Agent B Selector */}
           <div className="space-y-3">
-            <label className="text-xs font-semibold uppercase tracking-wider text-purple-400 flex items-center space-x-2">
-              <span className="w-2 h-2 rounded-full bg-purple-500" />
-              <span>Agent B (Responding Date)</span>
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold uppercase tracking-wider text-purple-400 flex items-center space-x-2">
+                <span className="w-2 h-2 rounded-full bg-purple-500" />
+                <span>Agent B (Responding Date)</span>
+              </label>
+              <label className="flex items-center space-x-1.5 cursor-pointer text-slate-400 hover:text-slate-200 select-none">
+                <input
+                  type="checkbox"
+                  checked={onlyCompatible}
+                  onChange={(e) => setOnlyCompatible(e.target.checked)}
+                  className="rounded bg-slate-800 border-slate-700 text-pink-600 focus:ring-0 text-xs"
+                />
+                <span className="text-[11px]">Compatible only</span>
+              </label>
+            </div>
             <select
               value={partBId}
               onChange={(e) => setPartBId(e.target.value)}
               disabled={simulating}
               className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 focus:outline-none focus:border-pink-500"
             >
-              {participants.map((p) => (
+              {candidatesForB.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name} ({p.location || "California"}) {p.is_synthetic ? "• Synthetic" : "• Verified"}
+                  {p.name} ({p.gender || "Open"}, seeks {p.target_gender || "Open"}) &bull; {p.location || "India"}
                 </option>
               ))}
             </select>
@@ -125,6 +209,31 @@ export default function LiveDatingSimulationPage() {
                 {partB.analyzed_profile?.summary || "Profile loaded"}
               </p>
             )}
+          </div>
+        </div>
+
+        {/* Real-Time Pre-Flight Eligibility Badge */}
+        <div
+          className={`p-3.5 rounded-xl border flex items-center space-x-3 text-xs ${
+            eligibility.eligible
+              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+              : "bg-amber-500/10 border-amber-500/30 text-amber-300"
+          }`}
+        >
+          {eligibility.eligible ? (
+            <CheckCircle2 className="w-4 h-4 flex-shrink-0 text-emerald-400" />
+          ) : (
+            <AlertTriangle className="w-4 h-4 flex-shrink-0 text-amber-400" />
+          )}
+          <div className="flex-1">
+            <span className="font-semibold block">
+              {eligibility.eligible ? "Pre-Flight Status: Compatible Pair" : "Pre-Flight Status: Incompatible Selection"}
+            </span>
+            <span className="text-[11px] opacity-90">
+              {eligibility.eligible
+                ? "Mutual gender preferences aligned, consent verified, and both agents are eligible for autonomous simulation."
+                : eligibility.reason}
+            </span>
           </div>
         </div>
 
@@ -145,23 +254,30 @@ export default function LiveDatingSimulationPage() {
             ))}
           </div>
 
-          <button
-            onClick={handleStartSimulation}
-            disabled={simulating || !partAId || !partBId}
-            className="w-full sm:w-auto bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white font-semibold px-6 py-2.5 rounded-xl shadow-lg shadow-pink-600/30 text-xs flex items-center justify-center space-x-2 disabled:opacity-50 transition-all"
-          >
-            {simulating ? (
-              <>
-                <RefreshCw className="w-4 h-4 animate-spin" />
-                <span>Simulating Multi-Agent Date...</span>
-              </>
-            ) : (
-              <>
-                <PlayCircle className="w-4 h-4" />
-                <span>Begin Autonomous Date</span>
-              </>
+          <div className="flex flex-col items-end space-y-1 w-full sm:w-auto">
+            <button
+              onClick={handleStartSimulation}
+              disabled={simulating || !partAId || !partBId || !eligibility.eligible}
+              className="w-full sm:w-auto bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white font-semibold px-6 py-2.5 rounded-xl shadow-lg shadow-pink-600/30 text-xs flex items-center justify-center space-x-2 disabled:opacity-40 transition-all"
+            >
+              {simulating ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Simulating Multi-Agent Date...</span>
+                </>
+              ) : (
+                <>
+                  <PlayCircle className="w-4 h-4" />
+                  <span>Begin Autonomous Date</span>
+                </>
+              )}
+            </button>
+            {!eligibility.eligible && (
+              <span className="text-[10px] text-amber-400/90 font-medium">
+                Select a compatible candidate pair to enable date simulation.
+              </span>
             )}
-          </button>
+          </div>
         </div>
       </div>
 

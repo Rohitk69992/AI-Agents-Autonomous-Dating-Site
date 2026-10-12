@@ -59,62 +59,54 @@ export default function AdminOperationsPage() {
     setActionStatus("Admin session locked. Session key removed.");
   };
 
-  const ensureAdminKey = (): string | null => {
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [pendingAction, setPendingAction] = useState<((key: string) => Promise<void>) | null>(null);
+  const [authModalKey, setAuthModalKey] = useState("");
+
+  const executeWithAuth = (action: (key: string) => Promise<void>) => {
     const key = getSessionAdminKey();
-    if (!key) {
-      const entered = window.prompt("Enter ADMIN_API_KEY to authorize administrative action:");
-      if (entered && entered.trim()) {
-        setSessionAdminKey(entered.trim());
-        setIsUnlocked(true);
-        return entered.trim();
+    if (key) {
+      action(key);
+    } else {
+      setPendingAction(() => action);
+      setShowAuthModal(true);
+    }
+  };
+
+  const handleSeedDemo = () => {
+    executeWithAuth(async (key: string) => {
+      setExecuting(true);
+      setActionStatus(null);
+      try {
+        await api.seedDemo(key);
+        setActionStatus("Demonstration dataset seeded and simulated successfully.");
+        const [c, m] = await Promise.all([api.getAdminConfig(), api.getMetrics()]);
+        setConfig(c);
+        setMetrics(m);
+      } catch (err: any) {
+        setActionStatus(`Error: ${err.message}`);
+      } finally {
+        setExecuting(false);
       }
-      return null;
-    }
-    return key;
+    });
   };
 
-  const handleSeedDemo = async () => {
-    const key = ensureAdminKey();
-    if (!key) {
-      setActionStatus("Action aborted: Admin authorization required.");
-      return;
-    }
-
-    setExecuting(true);
-    setActionStatus(null);
-    try {
-      await api.seedDemo(key);
-      setActionStatus("Demonstration dataset seeded and simulated successfully.");
-      const [c, m] = await Promise.all([api.getAdminConfig(), api.getMetrics()]);
-      setConfig(c);
-      setMetrics(m);
-    } catch (err: any) {
-      setActionStatus(`Error: ${err.message}`);
-    } finally {
-      setExecuting(false);
-    }
-  };
-
-  const handleRunFullBenchmark = async () => {
-    const key = ensureAdminKey();
-    if (!key) {
-      setActionStatus("Action aborted: Admin authorization required.");
-      return;
-    }
-
-    setExecuting(true);
-    setActionStatus(null);
-    try {
-      await api.startRun({
-        run_id: "demo-run-25-participants",
-        name: "Full 25-Participant Complete Simulation Benchmark",
-      }, key);
-      setActionStatus("Full 25-Participant batch simulation job enqueued in background worker.");
-    } catch (err: any) {
-      setActionStatus(`Error: ${err.message}`);
-    } finally {
-      setExecuting(false);
-    }
+  const handleRunFullBenchmark = () => {
+    executeWithAuth(async (key: string) => {
+      setExecuting(true);
+      setActionStatus(null);
+      try {
+        await api.startRun({
+          run_id: "demo-run-25-participants",
+          name: "Full 25-Participant Complete Simulation Benchmark",
+        }, key);
+        setActionStatus("Full 25-Participant batch simulation job enqueued in background worker.");
+      } catch (err: any) {
+        setActionStatus(`Error: ${err.message}`);
+      } finally {
+        setExecuting(false);
+      }
+    });
   };
 
   return (
@@ -281,6 +273,75 @@ export default function AdminOperationsPage() {
           </button>
         </div>
       </div>
+
+      {/* In-App Admin Authorization Modal */}
+      {showAuthModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl">
+            <div className="flex items-center space-x-3 text-pink-400">
+              <div className="w-9 h-9 rounded-xl bg-pink-500/10 border border-pink-500/20 flex items-center justify-center text-pink-400">
+                <Lock className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">Admin Authorization Required</h3>
+                <p className="text-[11px] text-slate-400">Privileged action confirmation</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Enter your <code className="bg-slate-800 px-1.5 py-0.5 rounded text-pink-300 font-mono">ADMIN_API_KEY</code> to authorize this operation. The key is stored in your active browser session only.
+            </p>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const trimmed = authModalKey.trim();
+                if (!trimmed) return;
+                setSessionAdminKey(trimmed);
+                setIsUnlocked(true);
+                setShowAuthModal(false);
+                setAuthModalKey("");
+                if (pendingAction) {
+                  const actionToRun = pendingAction;
+                  setPendingAction(null);
+                  actionToRun(trimmed);
+                }
+              }}
+              className="space-y-4"
+            >
+              <input
+                type="password"
+                placeholder="Enter ADMIN_API_KEY..."
+                value={authModalKey}
+                onChange={(e) => setAuthModalKey(e.target.value)}
+                autoFocus
+                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-pink-500"
+              />
+              <div className="flex justify-end space-x-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAuthModal(false);
+                    setPendingAction(null);
+                    setAuthModalKey("");
+                    setActionStatus("Action cancelled: Authorization was not provided.");
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!authModalKey.trim()}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-pink-600 hover:bg-pink-500 text-white disabled:opacity-50 transition-colors shadow-md shadow-pink-600/20"
+                >
+                  Authorize & Proceed
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

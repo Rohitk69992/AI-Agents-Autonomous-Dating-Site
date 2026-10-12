@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { 
   ShieldCheck, ExternalLink, ArrowLeft, RefreshCw, CheckCircle2, 
-  HelpCircle, Sparkles, HeartHandshake, FileText, AlertCircle, Calendar, Hash
+  HelpCircle, Sparkles, HeartHandshake, FileText, AlertCircle, Calendar, Hash, AlertTriangle
 } from "lucide-react";
 import { api, getSessionAdminKey, setSessionAdminKey } from "@/lib/api";
 
@@ -40,69 +40,89 @@ export default function ParticipantProfilePage() {
 
   const [deleting, setDeleting] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
+  const [modalAction, setModalAction] = useState<{
+    type: "delete" | "withdraw";
+    title: string;
+    description: string;
+    confirmText: string;
+    isDestructive: boolean;
+  } | null>(null);
+  const [modalKeyInput, setModalKeyInput] = useState("");
+  const [notification, setNotification] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   const handleReanalyze = async () => {
     setReanalyzing(true);
     try {
       const updatedProfile = await api.triggerAnalysis(id);
       setParticipant((prev: any) => ({ ...prev, analyzed_profile: updatedProfile }));
-    } catch (err) {
+      setNotification({ type: "success", message: "Participant profile re-analyzed successfully." });
+    } catch (err: any) {
       console.error("Reanalysis failed:", err);
+      setNotification({ type: "error", message: `Reanalysis failed: ${err.message || err}` });
     } finally {
       setReanalyzing(false);
     }
   };
 
-  const handleDelete = async () => {
+  const promptDelete = () => {
     if (!participant) return;
-    const ok = window.confirm(
-      `Permanently delete participant "${participant.name}"?\n\nThis complies with right-to-be-forgotten privacy policy and will delete all associated date records and rankings.`
-    );
-    if (!ok) return;
-
-    let key = getSessionAdminKey();
-    if (!key) {
-      const entered = window.prompt("Enter ADMIN_API_KEY to authorize participant deletion:");
-      if (!entered) return;
-      key = entered.trim();
-      setSessionAdminKey(key);
-    }
-
-    setDeleting(true);
-    try {
-      await api.deleteParticipant(participant.id, key);
-      router.push("/participants");
-    } catch (err: any) {
-      alert(`Failed to delete participant: ${err.message || err}`);
-      setDeleting(false);
-    }
+    setModalAction({
+      type: "delete",
+      title: `Delete Participant: ${participant.name}`,
+      description: "Permanently delete this participant under the Right-to-be-Forgotten privacy policy. All associated dating records and compatibility rankings will be permanently removed.",
+      confirmText: "Delete Permanently",
+      isDestructive: true
+    });
+    setModalKeyInput("");
   };
 
-  const handleWithdraw = async () => {
+  const promptWithdraw = () => {
     if (!participant) return;
-    const ok = window.confirm(
-      `Withdraw "${participant.name}" from future dating simulations?\n\nTheir profile will be marked withdrawn and excluded from future matches and candidate rankings.`
-    );
-    if (!ok) return;
+    setModalAction({
+      type: "withdraw",
+      title: `Withdraw Participant: ${participant.name}`,
+      description: `Withdraw ${participant.name} from future autonomous dating simulations. Their existing data remains recorded, but they will be excluded from new candidate matchings.`,
+      confirmText: "Withdraw Participant",
+      isDestructive: false
+    });
+    setModalKeyInput("");
+  };
+
+  const handleModalSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!modalAction || !participant) return;
 
     let key = getSessionAdminKey();
     if (!key) {
-      const entered = window.prompt("Enter ADMIN_API_KEY to authorize participant withdrawal:");
-      if (!entered) return;
-      key = entered.trim();
+      if (!modalKeyInput.trim()) return;
+      key = modalKeyInput.trim();
       setSessionAdminKey(key);
     }
 
-    setWithdrawing(true);
-    try {
-      await api.withdrawParticipant(participant.id, key);
-      const updated = await api.getParticipant(participant.id);
-      setParticipant(updated);
-      alert(`Participant "${participant.name}" has been successfully withdrawn.`);
-    } catch (err: any) {
-      alert(`Failed to withdraw participant: ${err.message || err}`);
-    } finally {
-      setWithdrawing(false);
+    if (modalAction.type === "delete") {
+      setDeleting(true);
+      try {
+        await api.deleteParticipant(participant.id, key);
+        router.push("/participants");
+      } catch (err: any) {
+        setNotification({ type: "error", message: `Failed to delete participant: ${err.message || err}` });
+        setDeleting(false);
+      } finally {
+        setModalAction(null);
+      }
+    } else if (modalAction.type === "withdraw") {
+      setWithdrawing(true);
+      try {
+        await api.withdrawParticipant(participant.id, key);
+        const updated = await api.getParticipant(participant.id);
+        setParticipant(updated);
+        setNotification({ type: "success", message: `Participant "${participant.name}" has been successfully withdrawn.` });
+      } catch (err: any) {
+        setNotification({ type: "error", message: `Failed to withdraw participant: ${err.message || err}` });
+      } finally {
+        setWithdrawing(false);
+        setModalAction(null);
+      }
     }
   };
 
@@ -157,6 +177,32 @@ export default function ParticipantProfilePage() {
         </div>
       </div>
 
+      {/* Inline Notification Banner */}
+      {notification && (
+        <div
+          className={`p-4 rounded-xl text-xs flex items-center justify-between space-x-2 ${
+            notification.type === "success"
+              ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-300"
+              : "bg-rose-500/10 border border-rose-500/30 text-rose-300"
+          }`}
+        >
+          <div className="flex items-center space-x-2">
+            {notification.type === "success" ? (
+              <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            )}
+            <span>{notification.message}</span>
+          </div>
+          <button
+            onClick={() => setNotification(null)}
+            className="text-slate-400 hover:text-white text-xs px-2 py-0.5"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Participant Header Card */}
       <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 sm:p-8 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
@@ -195,7 +241,7 @@ export default function ParticipantProfilePage() {
           <div className="flex flex-wrap items-center gap-2 text-xs">
             {participant.status !== "withdrawn" && (
               <button
-                onClick={handleWithdraw}
+                onClick={promptWithdraw}
                 disabled={withdrawing}
                 className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 px-3 py-1.5 rounded-lg border border-amber-500/30 flex items-center space-x-1.5 transition-colors disabled:opacity-50"
               >
@@ -203,7 +249,7 @@ export default function ParticipantProfilePage() {
               </button>
             )}
             <button
-              onClick={handleDelete}
+              onClick={promptDelete}
               disabled={deleting}
               className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 px-3 py-1.5 rounded-lg border border-rose-500/30 flex items-center space-x-1.5 transition-colors disabled:opacity-50"
             >
@@ -450,6 +496,73 @@ export default function ParticipantProfilePage() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* In-App Confirmation Modal for Deletion / Withdrawal */}
+      {modalAction && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl">
+            <div className="flex items-center space-x-3">
+              <div
+                className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                  modalAction.isDestructive
+                    ? "bg-rose-500/10 border border-rose-500/20 text-rose-400"
+                    : "bg-amber-500/10 border border-amber-500/20 text-amber-400"
+                }`}
+              >
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">{modalAction.title}</h3>
+                <p className="text-[11px] text-slate-400">Consent & Privacy Control</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              {modalAction.description}
+            </p>
+
+            <form onSubmit={handleModalSubmit} className="space-y-4">
+              {!getSessionAdminKey() && (
+                <div className="space-y-1.5">
+                  <label className="text-[11px] text-slate-400 block font-semibold">
+                    Admin API Key (required to authorize):
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="Enter ADMIN_API_KEY..."
+                    value={modalKeyInput}
+                    onChange={(e) => setModalKeyInput(e.target.value)}
+                    autoFocus
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-pink-500"
+                  />
+                </div>
+              )}
+
+              <div className="flex justify-end space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setModalAction(null)}
+                  disabled={deleting || withdrawing}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={deleting || withdrawing || (!getSessionAdminKey() && !modalKeyInput.trim())}
+                  className={`px-4 py-2 rounded-xl text-xs font-semibold text-white transition-colors disabled:opacity-50 ${
+                    modalAction.isDestructive
+                      ? "bg-rose-600 hover:bg-rose-500 shadow-md shadow-rose-600/20"
+                      : "bg-amber-600 hover:bg-amber-500 shadow-md shadow-amber-600/20"
+                  }`}
+                >
+                  {deleting || withdrawing ? "Processing..." : modalAction.confirmText}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
