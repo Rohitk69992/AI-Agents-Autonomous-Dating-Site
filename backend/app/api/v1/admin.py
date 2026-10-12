@@ -80,6 +80,9 @@ def update_admin_config(
 @router.get("/admin/metrics", response_model=ObservabilityMetricsResponse)
 def get_observability_metrics(db: Session = Depends(get_db)):
     total_parts = db.query(Participant).count()
+    synth_parts = db.query(Participant).filter(Participant.is_synthetic == True).count()
+    verified_parts = db.query(Participant).filter(Participant.is_synthetic == False, Participant.consent_verified == True).count()
+    withdrawn_parts = db.query(Participant).filter(Participant.status == "withdrawn").count()
     analyzed_parts = db.query(Participant).filter(Participant.status == "analyzed").count()
     total_sessions = db.query(DatingSession).count()
     completed_sessions = db.query(DatingSession).filter(DatingSession.status == "completed").count()
@@ -91,6 +94,9 @@ def get_observability_metrics(db: Session = Depends(get_db)):
 
     return ObservabilityMetricsResponse(
         total_participants=total_parts,
+        synthetic_participants=synth_parts,
+        verified_participants=verified_parts,
+        withdrawn_participants=withdrawn_parts,
         analyzed_participants=analyzed_parts,
         total_dating_sessions=total_sessions,
         completed_sessions=completed_sessions,

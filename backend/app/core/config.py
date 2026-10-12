@@ -14,6 +14,17 @@ class Settings(BaseSettings):
     
     # Admin Security
     ADMIN_API_KEY: str = os.getenv("ADMIN_API_KEY", "dev-admin-secret-key")
+
+    @field_validator("ADMIN_API_KEY")
+    @classmethod
+    def validate_admin_key(cls, v: str) -> str:
+        env = os.getenv("ENVIRONMENT", "development").lower()
+        if env == "production":
+            if not v or v.strip() in ("dev-admin-secret-key", "dev-admin-secret-change-in-prod"):
+                raise ValueError(
+                    "In production environment, a secure ADMIN_API_KEY must be explicitly set and cannot use default development keys."
+                )
+        return v
     
     # CORS: Explicit allowed origins (never wildcard in production)
     BACKEND_CORS_ORIGINS: List[str] = [

@@ -1,5 +1,39 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
-const ADMIN_API_KEY = process.env.NEXT_PUBLIC_ADMIN_API_KEY || "dev-admin-secret-key";
+
+/**
+ * Client session admin key store (sessionStorage only, never baked into client bundles or public configs).
+ */
+export function getSessionAdminKey(): string | null {
+  if (typeof window !== "undefined") {
+    try {
+      return sessionStorage.getItem("auramatch_admin_key");
+    } catch (_) {
+      return null;
+    }
+  }
+  return null;
+}
+
+export function setSessionAdminKey(key: string): void {
+  if (typeof window !== "undefined") {
+    try {
+      sessionStorage.setItem("auramatch_admin_key", key.trim());
+    } catch (_) {}
+  }
+}
+
+export function clearSessionAdminKey(): void {
+  if (typeof window !== "undefined") {
+    try {
+      sessionStorage.removeItem("auramatch_admin_key");
+    } catch (_) {}
+  }
+}
+
+function getAdminHeaders(adminKey?: string): Record<string, string> {
+  const key = adminKey || getSessionAdminKey();
+  return key ? { "X-Admin-Key": key } : {};
+}
 
 export async function fetchJson(endpoint: string, options: RequestInit = {}) {
   const url = `${API_BASE}${endpoint}`;
@@ -55,13 +89,19 @@ export const api = {
   deleteParticipant: (id: string, adminKey?: string) =>
     fetchJson(`/participants/${id}`, {
       method: "DELETE",
-      headers: { "X-Admin-Key": adminKey || ADMIN_API_KEY },
+      headers: getAdminHeaders(adminKey),
+    }),
+
+  withdrawParticipant: (id: string, adminKey?: string) =>
+    fetchJson(`/participants/${id}/withdraw`, {
+      method: "POST",
+      headers: getAdminHeaders(adminKey),
     }),
 
   importManifest: (data: any, adminKey?: string) =>
     fetchJson("/participants/import-manifest", {
       method: "POST",
-      headers: { "X-Admin-Key": adminKey || ADMIN_API_KEY },
+      headers: getAdminHeaders(adminKey),
       body: JSON.stringify(data),
     }),
 
@@ -106,14 +146,14 @@ export const api = {
   startRun: (data: { run_id?: string; name?: string }, adminKey?: string) =>
     fetchJson("/runs", {
       method: "POST",
-      headers: { "X-Admin-Key": adminKey || ADMIN_API_KEY },
+      headers: getAdminHeaders(adminKey),
       body: JSON.stringify(data),
     }),
 
   resumeRun: (runId: string, adminKey?: string) =>
     fetchJson(`/runs/${runId}/resume`, {
       method: "POST",
-      headers: { "X-Admin-Key": adminKey || ADMIN_API_KEY },
+      headers: getAdminHeaders(adminKey),
     }),
 
   // Admin & Health
@@ -126,13 +166,13 @@ export const api = {
   updateAdminConfig: (data: any, adminKey?: string) =>
     fetchJson("/admin/config", {
       method: "POST",
-      headers: { "X-Admin-Key": adminKey || ADMIN_API_KEY },
+      headers: getAdminHeaders(adminKey),
       body: JSON.stringify(data),
     }),
 
   seedDemo: (adminKey?: string) =>
     fetchJson("/admin/seed-demo", {
       method: "POST",
-      headers: { "X-Admin-Key": adminKey || ADMIN_API_KEY },
+      headers: getAdminHeaders(adminKey),
     }),
 };

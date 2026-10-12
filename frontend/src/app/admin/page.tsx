@@ -3,9 +3,9 @@
 import { useEffect, useState } from "react";
 import { 
   Settings, Server, ShieldCheck, Activity, RefreshCw, 
-  Database, Cpu, DollarSign, CheckCircle2, AlertTriangle, Layers
+  Database, Cpu, DollarSign, CheckCircle2, AlertTriangle, Layers, Lock, Unlock, Key
 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, getSessionAdminKey, setSessionAdminKey, clearSessionAdminKey } from "@/lib/api";
 
 export default function AdminOperationsPage() {
   const [config, setConfig] = useState<any>(null);
@@ -15,7 +15,16 @@ export default function AdminOperationsPage() {
   const [actionStatus, setActionStatus] = useState<string | null>(null);
   const [executing, setExecuting] = useState(false);
 
+  // Client-side session admin key (sessionStorage only, never baked into bundle)
+  const [adminKeyInput, setAdminKeyInput] = useState("");
+  const [isUnlocked, setIsUnlocked] = useState(false);
+
   useEffect(() => {
+    const existing = getSessionAdminKey();
+    if (existing) {
+      setIsUnlocked(true);
+    }
+
     async function loadOpsData() {
       try {
         const [c, m, h] = await Promise.all([
@@ -35,11 +44,46 @@ export default function AdminOperationsPage() {
     loadOpsData();
   }, []);
 
+  const handleUnlock = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminKeyInput.trim()) return;
+    setSessionAdminKey(adminKeyInput.trim());
+    setIsUnlocked(true);
+    setAdminKeyInput("");
+    setActionStatus("Admin session key stored in active browser session.");
+  };
+
+  const handleLock = () => {
+    clearSessionAdminKey();
+    setIsUnlocked(false);
+    setActionStatus("Admin session locked. Session key removed.");
+  };
+
+  const ensureAdminKey = (): string | null => {
+    const key = getSessionAdminKey();
+    if (!key) {
+      const entered = window.prompt("Enter ADMIN_API_KEY to authorize administrative action:");
+      if (entered && entered.trim()) {
+        setSessionAdminKey(entered.trim());
+        setIsUnlocked(true);
+        return entered.trim();
+      }
+      return null;
+    }
+    return key;
+  };
+
   const handleSeedDemo = async () => {
+    const key = ensureAdminKey();
+    if (!key) {
+      setActionStatus("Action aborted: Admin authorization required.");
+      return;
+    }
+
     setExecuting(true);
     setActionStatus(null);
     try {
-      await api.seedDemo();
+      await api.seedDemo(key);
       setActionStatus("Demonstration dataset seeded and simulated successfully.");
       const [c, m] = await Promise.all([api.getAdminConfig(), api.getMetrics()]);
       setConfig(c);
@@ -52,13 +96,19 @@ export default function AdminOperationsPage() {
   };
 
   const handleRunFullBenchmark = async () => {
+    const key = ensureAdminKey();
+    if (!key) {
+      setActionStatus("Action aborted: Admin authorization required.");
+      return;
+    }
+
     setExecuting(true);
     setActionStatus(null);
     try {
       await api.startRun({
         run_id: "demo-run-25-participants",
         name: "Full 25-Participant Complete Simulation Benchmark",
-      });
+      }, key);
       setActionStatus("Full 25-Participant batch simulation job enqueued in background worker.");
     } catch (err: any) {
       setActionStatus(`Error: ${err.message}`);
@@ -76,8 +126,52 @@ export default function AdminOperationsPage() {
         </div>
         <h1 className="text-3xl font-extrabold text-white">System Configuration & Health</h1>
         <p className="text-slate-400 text-sm mt-1">
-          Inspect backend runtimes, background worker queues, model token consumption, and execute benchmark jobs.
+          Inspect backend runtimes, background worker queues, model token consumption, and execute authorized benchmark jobs.
         </p>
+      </div>
+
+      {/* Admin Session Security Bar */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div className="flex items-center space-x-3 text-xs">
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isUnlocked ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-amber-500/10 text-amber-400 border border-amber-500/20"}`}>
+            {isUnlocked ? <Unlock className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+          </div>
+          <div>
+            <span className="font-bold text-white block">
+              {isUnlocked ? "Admin Session: Authorized" : "Admin Session: Locked"}
+            </span>
+            <span className="text-slate-400 text-[11px]">
+              {isUnlocked ? "Session key active in client memory (never bundled in code)." : "Provide ADMIN_API_KEY to unlock privileged operations."}
+            </span>
+          </div>
+        </div>
+
+        {isUnlocked ? (
+          <button
+            onClick={handleLock}
+            className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-xl text-xs font-semibold border border-slate-700 transition-colors flex items-center space-x-1.5"
+          >
+            <Lock className="w-3.5 h-3.5" />
+            <span>Lock Session</span>
+          </button>
+        ) : (
+          <form onSubmit={handleUnlock} className="flex items-center space-x-2 w-full sm:w-auto">
+            <input
+              type="password"
+              placeholder="Enter Admin API Key..."
+              value={adminKeyInput}
+              onChange={(e) => setAdminKeyInput(e.target.value)}
+              className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-pink-500"
+            />
+            <button
+              type="submit"
+              className="bg-pink-600 hover:bg-pink-500 text-white font-semibold px-3 py-1.5 rounded-xl text-xs flex items-center space-x-1.5 whitespace-nowrap shadow-md shadow-pink-600/20"
+            >
+              <Key className="w-3.5 h-3.5" />
+              <span>Unlock</span>
+            </button>
+          </form>
+        )}
       </div>
 
       {actionStatus && (
@@ -153,8 +247,8 @@ export default function AdminOperationsPage() {
 
           <div className="space-y-1 bg-slate-800/40 p-4 rounded-xl border border-slate-800">
             <span className="text-slate-400 font-semibold uppercase text-[10px] block">API Key State</span>
-            <strong className={`text-sm ${config?.api_key_configured ? "text-emerald-400" : "text-emerald-400"}`}>
-              {config?.api_key_configured ? "Configured & Secure" : "Gemini Engine Active"}
+            <strong className="text-sm text-emerald-400">
+              {config?.api_key_configured ? "Configured & Secure" : "Offline Mock Harness Active"}
             </strong>
             <p className="text-[11px] text-slate-500">Credentials kept strictly outside public Git / bundle</p>
           </div>

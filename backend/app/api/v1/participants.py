@@ -4,7 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.db.models import Participant, EvidenceItem, AnalyzedProfile
+from app.db.models import (
+    Participant, EvidenceItem, AnalyzedProfile,
+    EligibleCandidatePair, CompatibilityRanking
+)
 from app.schemas.participant import (
     ParticipantCreate, ParticipantBatchCreate, ParticipantResponse,
     EvidenceItemResponse, AnalyzedProfileResponse,
@@ -99,12 +102,12 @@ def create_participant(
         linkedin_handle=li_handle,
         instagram_url=norm_ig,
         instagram_handle=ig_handle,
-        consent_status="consented",
+        consent_status="declared",
         consent_timestamp=datetime.datetime.utcnow(),
-        consent_verified=True,
+        consent_verified=False,
         source_verified=False,
         is_synthetic=False,
-        simulation_eligible=True,
+        simulation_eligible=False,
         status="pending",
         analysis_status="pending"
     )
@@ -193,7 +196,7 @@ def import_participant_manifest(
             consent_verified=item.consent_verified,
             source_verified=item.source_verified,
             is_synthetic=False,
-            simulation_eligible=True,
+            simulation_eligible=bool(item.consent_verified and item.source_verified),
             status="pending",
             analysis_status="pending"
         )
@@ -270,6 +273,58 @@ def delete_or_withdraw_participant(
     db.delete(p)
     db.commit()
     return {"status": "success", "message": f"Participant {participant_id} and all associated data permanently removed."}
+
+@router.post("/{participant_id}/verify", response_model=ParticipantResponse, status_code=status.HTTP_200_OK)
+def verify_participant_consent(
+    participant_id: str,
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_admin_auth)
+):
+    p = db.query(Participant).filter(Participant.id == participant_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Participant not found")
+    if p.status == "withdrawn":
+        raise HTTPException(status_code=400, detail="Cannot verify a withdrawn participant")
+    
+    p.consent_verified = True
+    p.source_verified = True
+    p.consent_status = "verified"
+    p.simulation_eligible = True
+    db.commit()
+    db.refresh(p)
+    return _build_participant_response(p)
+
+@router.post("/{participant_id}/withdraw", status_code=status.HTTP_200_OK)
+def withdraw_participant(
+    participant_id: str,
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_admin_auth)
+):
+    p = db.query(Participant).filter(Participant.id == participant_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Participant not found")
+    
+    p.status = "withdrawn"
+    p.consent_status = "withdrawn"
+    p.simulation_eligible = False
+
+    # Mark all candidate pairs involving this participant as ineligible
+    pairs = db.query(EligibleCandidatePair).filter(
+        (EligibleCandidatePair.participant_a_id == p.id) | (EligibleCandidatePair.participant_b_id == p.id)
+    ).all()
+    for pair in pairs:
+        pair.is_eligible = False
+        pair.ineligibility_reason = "Participant has withdrawn consent"
+        if pair.pair_status in ("pending", "simulating"):
+            pair.pair_status = "skipped"
+
+    # Remove any existing rankings for this participant
+    db.query(CompatibilityRanking).filter(
+        (CompatibilityRanking.source_participant_id == p.id) | (CompatibilityRanking.target_participant_id == p.id)
+    ).delete(synchronize_session=False)
+
+    db.commit()
+    return {"status": "success", "message": f"Participant {p.name} ({participant_id}) successfully withdrawn from dating simulations."}
 
 @router.post("/{participant_id}/analyze", response_model=AnalyzedProfileResponse)
 def trigger_analysis(participant_id: str, db: Session = Depends(get_db)):

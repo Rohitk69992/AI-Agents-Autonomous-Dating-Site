@@ -89,12 +89,22 @@ def compute_directional_score(
     ev_count_b = len(p_b.evidence_items) if p_b.evidence_items else 0
     confidence = min(1.0, max(0.4, (ev_count_b / 8.0)))
 
-    # Weighted directional score
-    w_pref = weights.get("weight_preferences", settings.WEIGHT_PREFERENCES)
-    w_int = weights.get("weight_shared_interests", settings.WEIGHT_SHARED_INTERESTS)
-    w_life = weights.get("weight_lifestyle_fit", settings.WEIGHT_LIFESTYLE_FIT)
-    w_eng = weights.get("weight_date_engagement", settings.WEIGHT_DATE_ENGAGEMENT)
-    w_val = weights.get("weight_values_priorities", settings.WEIGHT_VALUES_PRIORITIES)
+    # Weighted directional score with normalization
+    w_pref = float(weights.get("weight_preferences", settings.WEIGHT_PREFERENCES))
+    w_int = float(weights.get("weight_shared_interests", settings.WEIGHT_SHARED_INTERESTS))
+    w_life = float(weights.get("weight_lifestyle_fit", settings.WEIGHT_LIFESTYLE_FIT))
+    w_eng = float(weights.get("weight_date_engagement", settings.WEIGHT_DATE_ENGAGEMENT))
+    w_val = float(weights.get("weight_values_priorities", settings.WEIGHT_VALUES_PRIORITIES))
+
+    w_sum = w_pref + w_int + w_life + w_eng + w_val
+    if w_sum > 0:
+        w_pref, w_int, w_life, w_eng, w_val = (
+            w_pref / w_sum,
+            w_int / w_sum,
+            w_life / w_sum,
+            w_eng / w_sum,
+            w_val / w_sum,
+        )
 
     raw_individual = (
         (pref_score * w_pref)
@@ -136,15 +146,23 @@ def calculate_rankings_for_participant(
     p_a = db.query(Participant).filter(Participant.id == participant_id).first()
     if not p_a:
         return []
+    if p_a.status == "withdrawn" or p_a.consent_status == "withdrawn" or not getattr(p_a, "simulation_eligible", True):
+        return []
 
     prof_a = db.query(AnalyzedProfile).filter(AnalyzedProfile.participant_id == p_a.id).first()
 
-    # Query all eligible other participants
-    candidates = db.query(Participant).filter(
+    # Query all eligible other participants, keeping synthetic fixtures and real cohorts cleanly separated
+    candidates_query = db.query(Participant).filter(
         Participant.id != p_a.id,
-        Participant.consent_status == "consented",
-        Participant.status != "withdrawn"
-    ).all()
+        Participant.status != "withdrawn",
+        Participant.simulation_eligible == True
+    )
+    if getattr(p_a, "is_synthetic", False):
+        candidates_query = candidates_query.filter(Participant.is_synthetic == True)
+    else:
+        candidates_query = candidates_query.filter(Participant.is_synthetic == False)
+
+    candidates = candidates_query.all()
 
     # Remove existing rankings for this participant in this run to ensure clean idempotent overwrite
     existing_query = db.query(CompatibilityRanking).filter(

@@ -16,7 +16,7 @@ from app.ranking.engine import calculate_rankings_for_participant
 
 logger = logging.getLogger(__name__)
 
-# Official 25-participant consenting demonstration dataset
+# Synthetic benchmark dataset of 25 development fixtures
 DEMO_PARTICIPANTS = [
     {
         "id": "part-demo-01",
@@ -405,7 +405,7 @@ def seed_database(db: Session = None, run_simulation: bool = True):
         should_close = True
 
     try:
-        logger.info(f"Seeding {len(DEMO_PARTICIPANTS)} consenting demonstration participants...")
+        logger.info(f"Seeding {len(DEMO_PARTICIPANTS)} synthetic development fixtures...")
         
         participant_objs = []
         for pdata in DEMO_PARTICIPANTS:
@@ -560,7 +560,7 @@ def seed_database(db: Session = None, run_simulation: bool = True):
                 "total_eligible_pairs": demo_run.total_eligible_pairs,
                 "simulated_sessions": simulated_count,
                 "rankings_generated": True,
-                "policy": "Representative Consenting Demonstration Benchmark"
+                "policy": "Synthetic Development Benchmark Fixtures"
             }
             db.commit()
             logger.info(f"Demonstration run {run_id} completed successfully.")

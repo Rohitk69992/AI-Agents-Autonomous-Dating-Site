@@ -1,5 +1,6 @@
 import pytest
 import uuid
+from app.core.config import settings
 
 def test_full_dating_and_ranking_flow(client):
     uid = uuid.uuid4().hex[:6]
@@ -17,6 +18,8 @@ def test_full_dating_and_ranking_flow(client):
     assert resp_a.status_code == 201
     part_a = resp_a.json()
     assert part_a["id"] is not None
+    assert part_a["simulation_eligible"] is False
+    assert part_a["consent_status"] == "declared"
 
     # 2. Ingest Participant Beta
     resp_b = client.post("/api/v1/participants", json={
@@ -32,13 +35,38 @@ def test_full_dating_and_ranking_flow(client):
     assert resp_b.status_code == 201
     part_b = resp_b.json()
     assert part_b["id"] is not None
+    assert part_b["simulation_eligible"] is False
 
     # 3. Verify Profiles are Analyzed
     prof_a = client.get(f"/api/v1/participants/{part_a['id']}/profile")
     assert prof_a.status_code == 200
     assert "summary" in prof_a.json()
 
-    # 4. Execute a Real Dating Session Between Them
+    # 4. Attempt date before verification -> must be rejected with 400
+    unverified_date = client.post("/api/v1/dates", json={
+        "participant_a_id": part_a["id"],
+        "participant_b_id": part_b["id"],
+        "max_turns": 4
+    })
+    assert unverified_date.status_code == 400
+    assert "eligible" in unverified_date.json()["detail"].lower()
+
+    # Admin verifies consent & eligibility for both participants
+    verify_a = client.post(
+        f"/api/v1/participants/{part_a['id']}/verify",
+        headers={"X-Admin-Key": settings.ADMIN_API_KEY}
+    )
+    assert verify_a.status_code == 200
+    assert verify_a.json()["simulation_eligible"] is True
+
+    verify_b = client.post(
+        f"/api/v1/participants/{part_b['id']}/verify",
+        headers={"X-Admin-Key": settings.ADMIN_API_KEY}
+    )
+    assert verify_b.status_code == 200
+    assert verify_b.json()["simulation_eligible"] is True
+
+    # 5. Execute Dating Session Between Them
     date_resp = client.post("/api/v1/dates", json={
         "participant_a_id": part_a["id"],
         "participant_b_id": part_b["id"],
@@ -52,14 +80,15 @@ def test_full_dating_and_ranking_flow(client):
     assert date_data["outcome_status"] is not None
     assert date_data["outcome_summary"] is not None
 
-    # Check that messages have internal thought and spoken content
+    # Check privacy: internal thought MUST be redacted (None) in public API response
     for msg in date_data["messages"]:
         assert len(msg["content"]) > 0
-        assert msg["internal_thought"] is not None
+        assert msg["internal_thought"] is None
 
-    # 5. Verify Rankings Reflect the Persisted Date
+    # 6. Verify Rankings Reflect the Persisted Date
     rankings_resp = client.get(f"/api/v1/participants/{part_a['id']}/rankings")
     assert rankings_resp.status_code == 200
     rankings_data = rankings_resp.json()
     target_ids = [r["target_participant_id"] for r in rankings_data["rankings"]]
     assert part_b["id"] in target_ids
+

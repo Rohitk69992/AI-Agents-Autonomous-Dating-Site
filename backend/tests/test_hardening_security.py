@@ -139,3 +139,95 @@ def test_cors_preflight_and_headers(client):
     assert resp.status_code == 200
     assert resp.headers.get("access-control-allow-origin") == "http://localhost:3000"
     assert resp.headers.get("access-control-allow-credentials") == "true"
+
+def test_participant_withdrawal_cascades(client):
+    # Ingest a participant
+    resp = client.post("/api/v1/participants", json={
+        "name": "Withdrawal Test Subject",
+        "age": 28,
+        "gender": "Non-binary",
+        "target_gender": "Any",
+        "location": "Oakland, CA",
+        "linkedin_url": "https://www.linkedin.com/in/withdrawal-test-subject",
+        "instagram_url": "https://www.instagram.com/withdrawal_test_subj",
+        "consent_confirmed": True
+    })
+    assert resp.status_code == 201
+    p_id = resp.json()["id"]
+
+    # Verify participant with admin key
+    v_resp = client.post(
+        f"/api/v1/participants/{p_id}/verify",
+        headers={"X-Admin-Key": settings.ADMIN_API_KEY}
+    )
+    assert v_resp.status_code == 200
+    assert v_resp.json()["simulation_eligible"] is True
+
+    # Withdraw participant without admin key -> 401
+    w_fail = client.post(f"/api/v1/participants/{p_id}/withdraw")
+    assert w_fail.status_code == 401
+
+    # Withdraw with admin key -> 200
+    w_resp = client.post(
+        f"/api/v1/participants/{p_id}/withdraw",
+        headers={"X-Admin-Key": settings.ADMIN_API_KEY}
+    )
+    assert w_resp.status_code == 200
+
+    # Verify participant state reflects withdrawal
+    check_resp = client.get(f"/api/v1/participants/{p_id}")
+    assert check_resp.status_code == 200
+    p_data = check_resp.json()
+    assert p_data["status"] == "withdrawn"
+    assert p_data["consent_status"] == "withdrawn"
+    assert p_data["simulation_eligible"] is False
+
+def test_withdrawn_participant_cannot_date(client):
+    # Create and withdraw
+    resp = client.post("/api/v1/participants", json={
+        "name": "Withdrawn Person A",
+        "age": 30,
+        "gender": "Female",
+        "target_gender": "Male",
+        "location": "San Francisco, CA",
+        "linkedin_url": "https://www.linkedin.com/in/withdrawn-person-a",
+        "instagram_url": "https://www.instagram.com/withdrawn_person_a",
+        "consent_confirmed": True
+    })
+    p_id = resp.json()["id"]
+    client.post(f"/api/v1/participants/{p_id}/withdraw", headers={"X-Admin-Key": settings.ADMIN_API_KEY})
+
+    # Attempt to date with any other participant -> 400
+    list_resp = client.get("/api/v1/participants")
+    other_p = [p for p in list_resp.json() if p["id"] != p_id][0]
+
+    date_resp = client.post("/api/v1/dates", json={
+        "participant_a_id": p_id,
+        "participant_b_id": other_p["id"],
+        "max_turns": 4
+    })
+    assert date_resp.status_code == 400
+    assert "withdrawn" in date_resp.json()["detail"].lower() or "eligible" in date_resp.json()["detail"].lower()
+
+def test_production_admin_key_validation(monkeypatch):
+    from app.core.config import Settings
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    
+    # In production, default dev key must raise ValueError
+    with pytest.raises(ValueError) as exc:
+        Settings(ADMIN_API_KEY="dev-admin-secret-key")
+    assert "ADMIN_API_KEY must be explicitly set" in str(exc.value)
+
+    # Custom secure key succeeds
+    valid_settings = Settings(ADMIN_API_KEY="a-very-secure-random-prod-key-12345")
+    assert valid_settings.ADMIN_API_KEY == "a-very-secure-random-prod-key-12345"
+
+def test_observability_metrics_truthfulness(client):
+    resp = client.get("/api/v1/admin/metrics", headers={"X-Admin-Key": settings.ADMIN_API_KEY})
+    assert resp.status_code == 200
+    metrics = resp.json()
+    assert "synthetic_participants" in metrics
+    assert "verified_participants" in metrics
+    assert "withdrawn_participants" in metrics
+    assert metrics["total_participants"] >= metrics["synthetic_participants"]
+

@@ -26,6 +26,9 @@ class UpdateConfigAdminRequest(BaseModel):
 
 class ObservabilityMetricsResponse(BaseModel):
     total_participants: int
+    synthetic_participants: int = 0
+    verified_participants: int = 0
+    withdrawn_participants: int = 0
     analyzed_participants: int
     total_dating_sessions: int
     completed_sessions: int

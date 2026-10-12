@@ -7,7 +7,7 @@ import {
   ShieldCheck, ExternalLink, ArrowLeft, RefreshCw, CheckCircle2, 
   HelpCircle, Sparkles, HeartHandshake, FileText, AlertCircle, Calendar, Hash
 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, getSessionAdminKey, setSessionAdminKey } from "@/lib/api";
 
 export default function ParticipantProfilePage() {
   const { id } = useParams<{ id: string }>();
@@ -39,6 +39,7 @@ export default function ParticipantProfilePage() {
   }, [id]);
 
   const [deleting, setDeleting] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
 
   const handleReanalyze = async () => {
     setReanalyzing(true);
@@ -59,13 +60,49 @@ export default function ParticipantProfilePage() {
     );
     if (!ok) return;
 
+    let key = getSessionAdminKey();
+    if (!key) {
+      const entered = window.prompt("Enter ADMIN_API_KEY to authorize participant deletion:");
+      if (!entered) return;
+      key = entered.trim();
+      setSessionAdminKey(key);
+    }
+
     setDeleting(true);
     try {
-      await api.deleteParticipant(participant.id);
+      await api.deleteParticipant(participant.id, key);
       router.push("/participants");
     } catch (err: any) {
       alert(`Failed to delete participant: ${err.message || err}`);
       setDeleting(false);
+    }
+  };
+
+  const handleWithdraw = async () => {
+    if (!participant) return;
+    const ok = window.confirm(
+      `Withdraw "${participant.name}" from future dating simulations?\n\nTheir profile will be marked withdrawn and excluded from future matches and candidate rankings.`
+    );
+    if (!ok) return;
+
+    let key = getSessionAdminKey();
+    if (!key) {
+      const entered = window.prompt("Enter ADMIN_API_KEY to authorize participant withdrawal:");
+      if (!entered) return;
+      key = entered.trim();
+      setSessionAdminKey(key);
+    }
+
+    setWithdrawing(true);
+    try {
+      await api.withdrawParticipant(participant.id, key);
+      const updated = await api.getParticipant(participant.id);
+      setParticipant(updated);
+      alert(`Participant "${participant.name}" has been successfully withdrawn.`);
+    } catch (err: any) {
+      alert(`Failed to withdraw participant: ${err.message || err}`);
+    } finally {
+      setWithdrawing(false);
     }
   };
 
@@ -130,16 +167,21 @@ export default function ParticipantProfilePage() {
             <div className="space-y-1">
               <h1 className="text-2xl font-bold text-white flex items-center space-x-2">
                 <span>{participant.name}</span>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  Consented
-                </span>
-                {participant.is_synthetic ? (
+                {participant.status === "withdrawn" || participant.consent_status === "withdrawn" ? (
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                    Withdrawn
+                  </span>
+                ) : participant.is_synthetic ? (
                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/20">
                     Synthetic Fixture
                   </span>
-                ) : (
+                ) : participant.consent_verified ? (
                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
-                    Verified Record
+                    Verified Consent
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-blue-500/10 text-blue-300 border border-blue-500/20">
+                    Consent Declared
                   </span>
                 )}
               </h1>
@@ -151,12 +193,21 @@ export default function ParticipantProfilePage() {
 
           {/* Social Proof URLs & Actions */}
           <div className="flex flex-wrap items-center gap-2 text-xs">
+            {participant.status !== "withdrawn" && (
+              <button
+                onClick={handleWithdraw}
+                disabled={withdrawing}
+                className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 px-3 py-1.5 rounded-lg border border-amber-500/30 flex items-center space-x-1.5 transition-colors disabled:opacity-50"
+              >
+                <span>{withdrawing ? "Withdrawing..." : "Withdraw from Dating"}</span>
+              </button>
+            )}
             <button
               onClick={handleDelete}
               disabled={deleting}
               className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 px-3 py-1.5 rounded-lg border border-rose-500/30 flex items-center space-x-1.5 transition-colors disabled:opacity-50"
             >
-              <span>{deleting ? "Removing..." : "Withdraw / Delete"}</span>
+              <span>{deleting ? "Removing..." : "Delete Permanently"}</span>
             </button>
             <a
               href={participant.linkedin_url}

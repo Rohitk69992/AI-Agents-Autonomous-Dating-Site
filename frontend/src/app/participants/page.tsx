@@ -127,16 +127,30 @@ export default function ParticipantsDirectoryPage() {
                       </div>
                     </div>
                     <div className="flex flex-col items-end gap-1">
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                        Consented
-                      </span>
+                      {p.status === "withdrawn" || p.consent_status === "withdrawn" ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                          Withdrawn
+                        </span>
+                      ) : p.is_synthetic ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                          Synthetic Fixture
+                        </span>
+                      ) : p.consent_verified ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          Verified Consent
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/10 text-blue-300 border border-blue-500/20">
+                          Consent Declared
+                        </span>
+                      )}
                       {p.is_synthetic ? (
-                        <span className="px-2 py-0.5 rounded text-[9px] font-mono bg-amber-500/10 text-amber-300 border border-amber-500/20">
-                          SYNTHETIC
+                        <span className="px-2 py-0.5 rounded text-[9px] font-mono bg-slate-800 text-slate-400 border border-slate-700">
+                          BENCHMARK
                         </span>
                       ) : (
                         <span className="px-2 py-0.5 rounded text-[9px] font-mono bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
-                          VERIFIED
+                          PARTICIPANT
                         </span>
                       )}
                     </div>

@@ -26,6 +26,11 @@ def start_dating_session(
     if not p_a or not p_b:
         raise HTTPException(status_code=404, detail="One or both participants not found.")
 
+    if p_a.status == "withdrawn" or p_b.status == "withdrawn":
+        raise HTTPException(status_code=400, detail="Cannot simulate dates with withdrawn participants.")
+    if not getattr(p_a, "simulation_eligible", True) or not getattr(p_b, "simulation_eligible", True):
+        raise HTTPException(status_code=400, detail="One or both participants are not currently eligible for dating simulations.")
+
     # Create dating session record
     session = DatingSession(
         run_id=data.run_id,
@@ -90,7 +95,7 @@ def get_session_messages(session_id: str, db: Session = Depends(get_db)):
             content=m.content,
             decision_summary=m.decision_summary or (m.internal_thought[:140] if m.internal_thought else None),
             decision_factors=m.decision_factors or [],
-            internal_thought=m.internal_thought,
+            internal_thought=None,
             question_asked=m.question_asked,
             interest_referenced=m.interest_referenced,
             timestamp=m.timestamp,
@@ -129,7 +134,6 @@ async def stream_session_events(session_id: str):
                         "content": msg.content,
                         "decision_summary": msg.decision_summary or (msg.internal_thought[:140] if msg.internal_thought else None),
                         "decision_factors": msg.decision_factors or [],
-                        "internal_thought": msg.internal_thought,
                         "question": msg.question_asked,
                         "interest": msg.interest_referenced
                     }
@@ -170,7 +174,7 @@ def _build_session_response(session: DatingSession, db: Session) -> DatingSessio
             content=m.content,
             decision_summary=m.decision_summary or (m.internal_thought[:140] if m.internal_thought else None),
             decision_factors=m.decision_factors or [],
-            internal_thought=m.internal_thought,
+            internal_thought=None,
             question_asked=m.question_asked,
             interest_referenced=m.interest_referenced,
             timestamp=m.timestamp,

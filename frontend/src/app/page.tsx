@@ -37,9 +37,10 @@ export default function DashboardPage() {
     loadData();
   }, []);
 
-  const totalRegistered = metrics?.total_participants || participants.length || 0;
-  const validatedCount = participants.filter((p) => p.consent_status === "consented").length;
-  const analyzedCount = metrics?.analyzed_participants || participants.filter((p) => p.status === "analyzed").length;
+  const totalRegistered = metrics?.total_participants ?? participants.length;
+  const synthCount = metrics?.synthetic_participants ?? participants.filter((p) => p.is_synthetic).length;
+  const verifiedCount = metrics?.verified_participants ?? participants.filter((p) => !p.is_synthetic && p.consent_verified).length;
+  const analyzedCount = metrics?.analyzed_participants ?? participants.filter((p) => p.status === "analyzed").length;
   const awaitingAnalysis = Math.max(0, totalRegistered - analyzedCount);
   const theoreticalPairs = totalRegistered > 1 ? Math.floor((totalRegistered * (totalRegistered - 1)) / 2) : 0;
   const eligiblePairs = run?.total_eligible_pairs ?? theoreticalPairs;
@@ -91,8 +92,12 @@ export default function DashboardPage() {
           </div>
           <div className="text-2xl sm:text-3xl font-bold text-white">{totalRegistered}</div>
           <p className="text-[11px] text-slate-400 flex items-center space-x-1">
-            <CheckCircle2 className="w-3 h-3 text-emerald-400 inline" />
-            <span>{validatedCount} Verified with Consenting URLs</span>
+            <CheckCircle2 className="w-3 h-3 text-pink-400 inline" />
+            <span>
+              {synthCount > 0 ? `${synthCount} Synthetic Fixtures` : ""}
+              {synthCount > 0 && verifiedCount > 0 ? " • " : ""}
+              {verifiedCount > 0 ? `${verifiedCount} Verified Records` : (synthCount === 0 ? "0 Verified" : "")}
+            </span>
           </p>
         </div>
 
