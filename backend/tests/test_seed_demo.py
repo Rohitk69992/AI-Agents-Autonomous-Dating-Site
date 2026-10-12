@@ -155,3 +155,14 @@ def test_api_search_by_name_and_location(client):
     resp_status = client.get("/api/v1/participants?status_filter=analyzed")
     assert resp_status.status_code == 200
     assert len(resp_status.json()) >= 20
+
+@pytest.mark.anyio
+async def test_lifespan_autoseeding_execution():
+    from app.main import app, lifespan
+    # Test that the startup lifespan context manager runs without import errors or failure
+    async with lifespan(app):
+        # Lifespan has executed startup block
+        from app.db.session import SessionLocal
+        with SessionLocal() as db:
+            count = db.query(Participant).count()
+            assert count >= 25, "Lifespan must ensure database is populated with demo participants"

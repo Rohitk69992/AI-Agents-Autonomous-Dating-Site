@@ -792,16 +792,19 @@ def seed_database(db: Session = None, run_simulation: bool = True) -> Dict[str, 
         participant_objs = []
 
         for pdata in DEMO_PARTICIPANTS:
-            # Idempotently check if participant already exists by id or unique urls
+            # Idempotently check if participant already exists by id or normalized/raw unique urls
+            _, norm_li, li_handle = validate_and_normalize_linkedin_url(pdata["linkedin_url"])
+            _, norm_ig, ig_handle = validate_and_normalize_instagram_url(pdata["instagram_url"])
+
             p = db.query(Participant).filter(
                 (Participant.id == pdata["id"]) |
+                (Participant.linkedin_url == norm_li) |
+                (Participant.instagram_url == norm_ig) |
                 (Participant.linkedin_url == pdata["linkedin_url"]) |
                 (Participant.instagram_url == pdata["instagram_url"])
             ).first()
 
             if not p:
-                _, norm_li, li_handle = validate_and_normalize_linkedin_url(pdata["linkedin_url"])
-                _, norm_ig, ig_handle = validate_and_normalize_instagram_url(pdata["instagram_url"])
                 
                 p = Participant(
                     id=pdata["id"],

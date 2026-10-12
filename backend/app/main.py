@@ -29,19 +29,19 @@ async def lifespan(app: FastAPI):
     # Auto-seed database if empty so judges and live deployments have instant demo data
     try:
         from app.db.session import SessionLocal
-        from app.models.participant import Participant
+        from app.db.models import Participant
         from app.db.seed_demo import seed_database
 
         with SessionLocal() as db:
             p_count = db.query(Participant).count()
             if p_count == 0:
                 logger.info("Database is empty (0 participants). Triggering automatic demo seeding...")
-                seed_database(db=db, run_simulation=True)
-                logger.info("Automatic demo seeding completed successfully.")
+                seed_res = seed_database(db=db, run_simulation=True)
+                logger.info(f"Automatic demo seeding completed successfully: {seed_res}")
             else:
                 logger.info(f"Database already populated ({p_count} participants found). Skipping auto-seed.")
     except Exception as e:
-        logger.warning(f"Auto-seed check encountered an issue (non-fatal): {e}")
+        logger.error(f"DATABASE AUTO-SEEDING FAILED ON STARTUP: {e}", exc_info=True)
 
     yield
     logger.info("Application shutting down.")
