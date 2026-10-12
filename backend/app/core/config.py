@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     
     # LLM Configuration
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", os.getenv("GOOGLE_API_KEY", ""))
-    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     # "gemini" for live Google Gemini calls; "offline_mock" strictly for offline tests
     LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "gemini" if (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")) else "offline_mock")
     

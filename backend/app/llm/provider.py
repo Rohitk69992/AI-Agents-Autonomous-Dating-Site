@@ -51,6 +51,14 @@ class BaseLLMProvider(ABC):
         pass
 
 
+DEFAULT_GEMINI_CANDIDATE_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash-lite",
+]
+
+
 class GeminiLLMProvider(BaseLLMProvider):
     def __init__(self, api_key: str, model_name: str = "gemini-2.5-flash"):
         if not api_key:
@@ -58,10 +66,50 @@ class GeminiLLMProvider(BaseLLMProvider):
                 "GEMINI_API_KEY must be provided for GeminiLLMProvider. "
                 "For offline testing, configure LLM_PROVIDER='offline_mock'."
             )
-        self.api_key = api_key
-        self.model_name = model_name
+        self.api_key = api_key.strip()
+        # Normalize model name (strip any inadvertent 'models/' prefix)
+        self.model_name = (model_name or "gemini-2.5-flash").replace("models/", "").strip()
         self.client = None
         self._init_client()
+
+    def _sanitize_error(self, err: Any) -> str:
+        text = str(err)
+        # Redact Google API key formats (e.g., AIzaSy...)
+        text = re.sub(r"AIza[0-9A-Za-z\-_]{35}", "[REDACTED_API_KEY]", text)
+        text = re.sub(r"([?&]key=)[^&\s\"']+", r"\1[REDACTED]", text)
+        text = re.sub(r'(api_key=["\']?)[^"\'\s&]+', r"\1[REDACTED]", text)
+        return text
+
+    def _is_not_found(self, err: Exception) -> bool:
+        err_str = str(err).lower()
+        err_cls = err.__class__.__name__.lower()
+        return (
+            "404" in err_str
+            or "not found" in err_str
+            or "not supported for generatecontent" in err_str
+            or "notfound" in err_cls
+        )
+
+    def _is_transient(self, err: Exception) -> bool:
+        err_str = str(err).lower()
+        err_cls = err.__class__.__name__.lower()
+        return (
+            "429" in err_str
+            or "resourceexhausted" in err_str
+            or "resource_exhausted" in err_str
+            or "quota" in err_str
+            or "rate limit" in err_str
+            or "503" in err_str
+            or "unavailable" in err_str
+            or "500" in err_str
+            or "internalservererror" in err_str
+            or "deadline" in err_cls
+            or "deadlineexceeded" in err_str
+            or "timeout" in err_str
+            or "timed out" in err_str
+            or "connection reset" in err_str
+            or "temporarily unavailable" in err_str
+        )
 
     def _init_client(self):
         try:
@@ -72,8 +120,24 @@ class GeminiLLMProvider(BaseLLMProvider):
                 generation_config={"temperature": 0.7}
             )
         except Exception as e:
-            logger.error(f"Failed to initialize Gemini client: {e}")
-            raise RuntimeError(f"Failed to initialize Gemini GenerativeModel: {e}")
+            sanitized = self._sanitize_error(e)
+            logger.error(f"Failed to initialize Gemini client: {sanitized}")
+            raise RuntimeError(f"Failed to initialize Gemini GenerativeModel: {sanitized}")
+
+    def _extract_tokens(self, response: Any, prompt: str, content: str) -> Tuple[int, int]:
+        tokens_in = len(prompt) // 4
+        tokens_out = len(content) // 4
+        try:
+            if hasattr(response, "usage_metadata") and response.usage_metadata:
+                prompt_tokens = getattr(response.usage_metadata, "prompt_token_count", None)
+                cand_tokens = getattr(response.usage_metadata, "candidates_token_count", None)
+                if prompt_tokens is not None:
+                    tokens_in = int(prompt_tokens)
+                if cand_tokens is not None:
+                    tokens_out = int(cand_tokens)
+        except Exception as meta_err:
+            logger.debug(f"Could not read usage_metadata: {meta_err}")
+        return tokens_in, tokens_out
 
     def generate(
         self,
@@ -95,16 +159,18 @@ class GeminiLLMProvider(BaseLLMProvider):
                 f"Do NOT include markdown formatting outside the JSON."
             )
 
-        # Retry logic with exponential backoff and model fallback (e.g. gemini-2.5-flash -> gemini-1.5-flash)
-        last_error = None
+        # Build ordered candidate models list: primary configured model first, followed by known stable fallbacks
         models_to_try = [self.model_name]
-        if self.model_name != "gemini-1.5-flash":
-            models_to_try.append("gemini-1.5-flash")
+        for candidate in DEFAULT_GEMINI_CANDIDATE_MODELS:
+            if candidate not in models_to_try:
+                models_to_try.append(candidate)
+
+        model_errors: Dict[str, str] = {}
+        import google.generativeai as genai
 
         for current_model_name in models_to_try:
             for attempt in range(2):
                 try:
-                    import google.generativeai as genai
                     model = genai.GenerativeModel(
                         model_name=current_model_name,
                         generation_config={
@@ -114,25 +180,13 @@ class GeminiLLMProvider(BaseLLMProvider):
                     )
                     response = model.generate_content(prompt_combined)
                     latency_ms = int((time.time() - start_time) * 1000)
-                    
-                    content = response.text or ""
+
+                    content = getattr(response, "text", "") or ""
                     structured_data = None
                     if response_schema:
                         structured_data = self._extract_json(content)
 
-                    # Extract actual token counts from response metadata if available
-                    tokens_in = len(prompt_combined) // 4
-                    tokens_out = len(content) // 4
-                    try:
-                        if hasattr(response, "usage_metadata") and response.usage_metadata:
-                            prompt_tokens = getattr(response.usage_metadata, "prompt_token_count", None)
-                            cand_tokens = getattr(response.usage_metadata, "candidates_token_count", None)
-                            if prompt_tokens is not None:
-                                tokens_in = prompt_tokens
-                            if cand_tokens is not None:
-                                tokens_out = cand_tokens
-                    except Exception as meta_err:
-                        logger.debug(f"Could not read usage_metadata: {meta_err}")
+                    tokens_in, tokens_out = self._extract_tokens(response, prompt_combined, content)
 
                     return LLMResponse(
                         content=content,
@@ -144,29 +198,101 @@ class GeminiLLMProvider(BaseLLMProvider):
                         provider="gemini"
                     )
                 except Exception as e:
-                    last_error = e
-                    logger.warning(f"Gemini API attempt with {current_model_name} (attempt {attempt + 1}) failed: {e}")
-                    time.sleep(1.0 * (2 ** attempt))
+                    sanitized_msg = self._sanitize_error(e)
+                    if self._is_not_found(e):
+                        logger.warning(
+                            f"Gemini model '{current_model_name}' returned 404/not supported. "
+                            f"Skipping immediately to next candidate model. Detail: {sanitized_msg}"
+                        )
+                        model_errors[current_model_name] = f"404 Not Found: {sanitized_msg}"
+                        # Do NOT retry 404 on the same model
+                        break
+                    elif self._is_transient(e):
+                        logger.warning(
+                            f"Gemini API transient failure with '{current_model_name}' (attempt {attempt + 1}/2): {sanitized_msg}"
+                        )
+                        if attempt == 0:
+                            time.sleep(1.0)
+                            continue
+                        else:
+                            model_errors[current_model_name] = f"Transient failure exhausted: {sanitized_msg}"
+                            break
+                    else:
+                        logger.warning(f"Gemini API non-transient error with '{current_model_name}': {sanitized_msg}")
+                        model_errors[current_model_name] = sanitized_msg
+                        break
 
-        raise RuntimeError(f"Gemini generation failed after attempts across {models_to_try}: {last_error}")
+        # Dynamic discovery fallback if all candidate models were not found
+        if all("404" in v or "not found" in v.lower() for v in model_errors.values()):
+            logger.info("All static candidate models returned 404. Attempting dynamic discovery via genai.list_models()...")
+            try:
+                discovered_models = []
+                for m in genai.list_models():
+                    methods = getattr(m, "supported_generation_methods", [])
+                    raw_name = getattr(m, "name", "").replace("models/", "").strip()
+                    if "generateContent" in methods and raw_name and raw_name not in models_to_try:
+                        discovered_models.append(raw_name)
+
+                # Prioritize flash models
+                discovered_models.sort(key=lambda x: (0 if "flash" in x.lower() else 1, x))
+
+                for disc_model in discovered_models[:3]:
+                    try:
+                        logger.info(f"Attempting dynamically discovered model: '{disc_model}'")
+                        model = genai.GenerativeModel(
+                            model_name=disc_model,
+                            generation_config={
+                                "temperature": temperature,
+                                "max_output_tokens": max_tokens,
+                            }
+                        )
+                        response = model.generate_content(prompt_combined)
+                        latency_ms = int((time.time() - start_time) * 1000)
+                        content = getattr(response, "text", "") or ""
+                        structured_data = None
+                        if response_schema:
+                            structured_data = self._extract_json(content)
+                        tokens_in, tokens_out = self._extract_tokens(response, prompt_combined, content)
+
+                        return LLMResponse(
+                            content=content,
+                            structured_data=structured_data,
+                            tokens_input=tokens_in,
+                            tokens_output=tokens_out,
+                            latency_ms=latency_ms,
+                            model=disc_model,
+                            provider="gemini"
+                        )
+                    except Exception as disc_err:
+                        model_errors[disc_model] = f"Discovery fail: {self._sanitize_error(disc_err)}"
+            except Exception as list_err:
+                logger.warning(f"Failed to query genai.list_models(): {self._sanitize_error(list_err)}")
+
+        attempt_summary = "; ".join(f"[{m}: {err}]" for m, err in model_errors.items())
+        raise RuntimeError(
+            f"Gemini generation failed after attempts across {list(model_errors.keys())}: {attempt_summary}"
+        )
 
     def _extract_json(self, text: str) -> Optional[Dict[str, Any]]:
+        if not text or not text.strip():
+            return None
+        clean_text = text.strip()
         try:
-            return json.loads(text.strip())
+            return json.loads(clean_text)
         except Exception:
             # Match JSON markdown block
-            match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
+            match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", clean_text)
             if match:
                 try:
                     return json.loads(match.group(1).strip())
                 except Exception:
                     pass
             # Find first { and last }
-            start = text.find("{")
-            end = text.rfind("}")
-            if start != -1 and end != -1:
+            start = clean_text.find("{")
+            end = clean_text.rfind("}")
+            if start != -1 and end != -1 and end > start:
                 try:
-                    return json.loads(text[start : end + 1])
+                    return json.loads(clean_text[start : end + 1])
                 except Exception:
                     pass
         return None
