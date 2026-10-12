@@ -33,10 +33,16 @@ class LLMResponse:
         self.latency_ms = latency_ms
         self.model = model
         self.provider = provider
-        self.cost_usd = (
-            (tokens_input / 1000.0) * PRICE_PER_1K_INPUT_USD
-            + (tokens_output / 1000.0) * PRICE_PER_1K_OUTPUT_USD
-        )
+        if provider == "groq":
+            if "70b" in (model or "").lower():
+                self.cost_usd = ((tokens_input / 1000.0) * 0.00059) + ((tokens_output / 1000.0) * 0.00079)
+            else:
+                self.cost_usd = ((tokens_input / 1000.0) * 0.00005) + ((tokens_output / 1000.0) * 0.00008)
+        else:
+            self.cost_usd = (
+                (tokens_input / 1000.0) * PRICE_PER_1K_INPUT_USD
+                + (tokens_output / 1000.0) * PRICE_PER_1K_OUTPUT_USD
+            )
 
 class BaseLLMProvider(ABC):
     @abstractmethod
@@ -49,6 +55,233 @@ class BaseLLMProvider(ABC):
         response_schema: Optional[Dict[str, Any]] = None
     ) -> LLMResponse:
         pass
+
+
+DEFAULT_GROQ_CANDIDATE_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+]
+
+
+class GroqLLMProvider(BaseLLMProvider):
+    def __init__(self, api_key: str, model_name: str = "llama-3.3-70b-versatile"):
+        if not api_key:
+            raise ValueError(
+                "GROQ_API_KEY must be provided for GroqLLMProvider. "
+                "For offline testing, configure LLM_PROVIDER='offline_mock'."
+            )
+        self.api_key = api_key.strip()
+        self.model_name = (model_name or "llama-3.3-70b-versatile").strip()
+        self.client = None
+        self._init_client()
+
+    def _sanitize_error(self, err: Any) -> str:
+        text = str(err)
+        text = re.sub(r"gsk_[A-Za-z0-9]+", "[REDACTED_GROQ_KEY]", text)
+        text = re.sub(r"AIza[0-9A-Za-z\-_]{35}", "[REDACTED_API_KEY]", text)
+        text = re.sub(r"([?&]key=)[^&\s\"']+", r"\1[REDACTED]", text)
+        text = re.sub(r'(api_key=["\']?)[^"\'\s&]+', r"\1[REDACTED]", text)
+        return text
+
+    def _is_not_found(self, err: Exception) -> bool:
+        err_str = str(err).lower()
+        status_code = getattr(err, "status_code", None)
+        return (
+            status_code == 404
+            or "404" in err_str
+            or "model_not_found" in err_str
+            or "not found" in err_str
+            or "does not exist" in err_str
+        )
+
+    def _is_transient(self, err: Exception) -> bool:
+        err_str = str(err).lower()
+        status_code = getattr(err, "status_code", None)
+        return (
+            status_code in (429, 500, 502, 503, 504)
+            or "429" in err_str
+            or "rate_limit" in err_str
+            or "quota" in err_str
+            or "too many requests" in err_str
+            or "503" in err_str
+            or "service unavailable" in err_str
+            or "timeout" in err_str
+            or "connection error" in err_str
+            or "temporarily unavailable" in err_str
+        )
+
+    def _init_client(self):
+        try:
+            from groq import Groq
+            self.client = Groq(api_key=self.api_key)
+        except Exception as e:
+            sanitized = self._sanitize_error(e)
+            logger.error(f"Failed to initialize Groq client: {sanitized}")
+            raise RuntimeError(f"Failed to initialize Groq client: {sanitized}")
+
+    def generate(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.7,
+        max_tokens: int = 1500,
+        response_schema: Optional[Dict[str, Any]] = None
+    ) -> LLMResponse:
+        start_time = time.time()
+        if not self.client:
+            raise RuntimeError("Groq client is uninitialized. Verify GROQ_API_KEY.")
+
+        prompt_combined = user_prompt
+        if response_schema:
+            prompt_combined += (
+                f"\n\nIMPORTANT: You MUST respond strictly with valid JSON conforming to this schema:\n"
+                f"{json.dumps(response_schema, indent=2)}\n"
+                f"Do NOT include conversational explanations or markdown formatting outside the JSON."
+            )
+
+        models_to_try = [self.model_name]
+        for candidate in DEFAULT_GROQ_CANDIDATE_MODELS:
+            if candidate not in models_to_try:
+                models_to_try.append(candidate)
+
+        model_errors: Dict[str, str] = {}
+
+        for current_model_name in models_to_try:
+            for attempt in range(2):
+                try:
+                    kwargs: Dict[str, Any] = {
+                        "model": current_model_name,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": prompt_combined},
+                        ],
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                    }
+                    if response_schema:
+                        kwargs["response_format"] = {"type": "json_object"}
+
+                    completion = self.client.chat.completions.create(**kwargs)
+                    latency_ms = int((time.time() - start_time) * 1000)
+
+                    content = ""
+                    if completion.choices and len(completion.choices) > 0:
+                        content = completion.choices[0].message.content or ""
+
+                    structured_data = None
+                    if response_schema:
+                        structured_data = self._extract_json(content)
+
+                    tokens_in = getattr(completion.usage, "prompt_tokens", 0) if completion.usage else len(system_prompt + prompt_combined) // 4
+                    tokens_out = getattr(completion.usage, "completion_tokens", 0) if completion.usage else len(content) // 4
+
+                    return LLMResponse(
+                        content=content,
+                        structured_data=structured_data,
+                        tokens_input=tokens_in,
+                        tokens_output=tokens_out,
+                        latency_ms=latency_ms,
+                        model=current_model_name,
+                        provider="groq"
+                    )
+                except Exception as e:
+                    sanitized_msg = self._sanitize_error(e)
+                    if self._is_not_found(e):
+                        logger.warning(
+                            f"Groq model '{current_model_name}' returned 404/not found. "
+                            f"Immediately skipping to next candidate model. Detail: {sanitized_msg}"
+                        )
+                        model_errors[current_model_name] = f"404 Not Found: {sanitized_msg}"
+                        break
+                    elif self._is_transient(e):
+                        logger.warning(
+                            f"Groq API transient failure with '{current_model_name}' (attempt {attempt + 1}/2): {sanitized_msg}"
+                        )
+                        if attempt == 0:
+                            time.sleep(1.0)
+                            continue
+                        else:
+                            model_errors[current_model_name] = f"Transient failure exhausted: {sanitized_msg}"
+                            break
+                    else:
+                        logger.warning(f"Groq API error with '{current_model_name}': {sanitized_msg}")
+                        model_errors[current_model_name] = sanitized_msg
+                        break
+
+        # Dynamic model discovery fallback if all candidate models were not found
+        if all("404" in v.lower() or "not found" in v.lower() for v in model_errors.values()):
+            logger.info("All static Groq candidate models returned 404. Attempting dynamic discovery via client.models.list()...")
+            try:
+                models_page = self.client.models.list()
+                discovered = []
+                data_list = getattr(models_page, "data", []) or []
+                for m in data_list:
+                    m_id = getattr(m, "id", "")
+                    if m_id and m_id not in models_to_try and ("llama" in m_id.lower() or "mixtral" in m_id.lower()):
+                        discovered.append(m_id)
+
+                for disc_model in discovered[:2]:
+                    try:
+                        logger.info(f"Attempting dynamically discovered Groq model: '{disc_model}'")
+                        kwargs = {
+                            "model": disc_model,
+                            "messages": [
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": prompt_combined},
+                            ],
+                            "temperature": temperature,
+                            "max_tokens": max_tokens,
+                        }
+                        if response_schema:
+                            kwargs["response_format"] = {"type": "json_object"}
+
+                        completion = self.client.chat.completions.create(**kwargs)
+                        latency_ms = int((time.time() - start_time) * 1000)
+                        content = completion.choices[0].message.content or ""
+                        structured_data = self._extract_json(content) if response_schema else None
+                        tokens_in = getattr(completion.usage, "prompt_tokens", 0) if completion.usage else 0
+                        tokens_out = getattr(completion.usage, "completion_tokens", 0) if completion.usage else 0
+
+                        return LLMResponse(
+                            content=content,
+                            structured_data=structured_data,
+                            tokens_input=tokens_in,
+                            tokens_output=tokens_out,
+                            latency_ms=latency_ms,
+                            model=disc_model,
+                            provider="groq"
+                        )
+                    except Exception as disc_err:
+                        model_errors[disc_model] = f"Discovery fail: {self._sanitize_error(disc_err)}"
+            except Exception as list_err:
+                logger.warning(f"Failed to query Groq client.models.list(): {self._sanitize_error(list_err)}")
+
+        attempt_summary = "; ".join(f"[{m}: {err}]" for m, err in model_errors.items())
+        raise RuntimeError(
+            f"Groq generation failed after attempts across {list(model_errors.keys())}: {attempt_summary}"
+        )
+
+    def _extract_json(self, text: str) -> Optional[Dict[str, Any]]:
+        if not text or not text.strip():
+            return None
+        clean_text = text.strip()
+        try:
+            return json.loads(clean_text)
+        except Exception:
+            match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", clean_text)
+            if match:
+                try:
+                    return json.loads(match.group(1).strip())
+                except Exception:
+                    pass
+            start = clean_text.find("{")
+            end = clean_text.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                try:
+                    return json.loads(clean_text[start : end + 1])
+                except Exception:
+                    pass
+        return None
 
 
 DEFAULT_GEMINI_CANDIDATE_MODELS = [
@@ -405,7 +638,14 @@ DeterministicProvider = OfflineMockProvider
 
 def get_llm_provider() -> BaseLLMProvider:
     provider = (settings.LLM_PROVIDER or "offline_mock").lower().strip()
-    if provider == "gemini":
+    if provider == "groq":
+        if not settings.GROQ_API_KEY:
+            raise RuntimeError(
+                "LLM_PROVIDER is configured as 'groq', but no GROQ_API_KEY is configured in the environment. "
+                "Set GROQ_API_KEY in your environment, or configure LLM_PROVIDER='offline_mock' for offline execution."
+            )
+        return GroqLLMProvider(api_key=settings.GROQ_API_KEY, model_name=settings.GROQ_MODEL)
+    elif provider == "gemini":
         if not settings.GEMINI_API_KEY:
             raise RuntimeError(
                 "LLM_PROVIDER is configured as 'gemini', but no GEMINI_API_KEY or GOOGLE_API_KEY is configured in the environment. "
@@ -413,6 +653,7 @@ def get_llm_provider() -> BaseLLMProvider:
             )
         return GeminiLLMProvider(api_key=settings.GEMINI_API_KEY, model_name=settings.GEMINI_MODEL)
     elif provider in ("offline_mock", "mock", "deterministic"):
-        return OfflineMockProvider(model_name=settings.GEMINI_MODEL)
+        active_model = settings.GROQ_MODEL if (settings.LLM_PROVIDER or "").lower().strip() == "groq" else settings.GEMINI_MODEL
+        return OfflineMockProvider(model_name=active_model)
     else:
-        raise ValueError(f"Unsupported LLM_PROVIDER '{settings.LLM_PROVIDER}'. Expected 'gemini' or 'offline_mock'.")
+        raise ValueError(f"Unsupported LLM_PROVIDER '{settings.LLM_PROVIDER}'. Expected 'groq', 'gemini', or 'offline_mock'.")

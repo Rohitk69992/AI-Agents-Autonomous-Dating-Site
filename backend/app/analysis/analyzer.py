@@ -133,8 +133,7 @@ Perform structured analysis according to the schema. Categorize all findings acc
     analyzed.relationship_preferences = data.get("relationship_preferences", [])
     analyzed.explicit_facts = data.get("explicit_facts", [])
     analyzed.inferences_with_confidence = data.get("inferences_with_confidence", [])
-    analyzed.uncertainties_and_unknowns = data.get("uncertainties_and_unknowns", [])
-    analyzed.model_version = response.model or "gemini-2.5-flash"
+    analyzed.model_version = response.model or (settings.GROQ_MODEL if settings.LLM_PROVIDER == "groq" else settings.GEMINI_MODEL)
     analyzed.analyzed_at = datetime.datetime.utcnow()
 
     db.add(analyzed)

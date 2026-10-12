@@ -79,7 +79,12 @@ export default function Navbar() {
                   }`}
                 />
                 <span className="text-slate-300 font-medium text-[11px]">
-                  {health.llm_model ? health.llm_model.replace(/gemini-2\.5-flash/i, "Gemini 2.5 Flash").replace(/gemini-1\.5-flash/i, "Gemini 1.5 Flash") : "Gemini 2.5 Flash"}
+                  {health.llm_model
+                    ? health.llm_model
+                        .replace(/llama-3\.3-70b-versatile/i, "Llama 3.3 70B (Groq)")
+                        .replace(/llama-3\.1-8b-instant/i, "Llama 3.1 8B (Groq)")
+                        .replace(/gemini-2\.5-flash/i, "Gemini 2.5 Flash")
+                    : "Llama 3.3 70B (Groq)"}
                 </span>
               </div>
             )}

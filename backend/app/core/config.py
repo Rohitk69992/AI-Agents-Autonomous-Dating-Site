@@ -51,10 +51,15 @@ class Settings(BaseSettings):
         ]
     
     # LLM Configuration
+    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+    GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", os.getenv("GOOGLE_API_KEY", ""))
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-    # "gemini" for live Google Gemini calls; "offline_mock" strictly for offline tests
-    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "gemini" if (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")) else "offline_mock")
+    # "groq" for Groq cloud inference; "gemini" for Google Gemini; "offline_mock" strictly for offline tests
+    LLM_PROVIDER: str = os.getenv(
+        "LLM_PROVIDER",
+        "groq" if os.getenv("GROQ_API_KEY") else ("gemini" if (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")) else "offline_mock")
+    )
     
     # Dating Simulation Parameters
     MAX_CONVERSATION_TURNS: int = 8

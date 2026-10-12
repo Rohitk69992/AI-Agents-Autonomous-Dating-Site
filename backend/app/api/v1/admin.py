@@ -25,13 +25,14 @@ def health_check(db: Session = Depends(get_db)):
         db_status = f"unhealthy: {str(e)}"
 
     active_jobs = db.query(BackgroundJob).filter(BackgroundJob.status.in_(["queued", "running"])).count()
+    active_model = settings.GROQ_MODEL if settings.LLM_PROVIDER == "groq" else settings.GEMINI_MODEL
 
     return HealthResponse(
         status="healthy" if db_status == "healthy" else "degraded",
         version=settings.VERSION,
         database=db_status,
         llm_provider=settings.LLM_PROVIDER,
-        llm_model=settings.GEMINI_MODEL,
+        llm_model=active_model,
         active_background_jobs=active_jobs
     )
 
@@ -42,10 +43,13 @@ def readiness_check(db: Session = Depends(get_db)):
 @router.get("/admin/config", response_model=AdminConfigResponse)
 def get_admin_config():
     masked_db = settings.DATABASE_URL.split("@")[-1] if "@" in settings.DATABASE_URL else settings.DATABASE_URL
+    active_model = settings.GROQ_MODEL if settings.LLM_PROVIDER == "groq" else settings.GEMINI_MODEL
+    key_configured = bool(settings.GROQ_API_KEY) if settings.LLM_PROVIDER == "groq" else bool(settings.GEMINI_API_KEY)
     return AdminConfigResponse(
         llm_provider=settings.LLM_PROVIDER,
-        gemini_model=settings.GEMINI_MODEL,
-        api_key_configured=bool(settings.GEMINI_API_KEY),
+        gemini_model=active_model,
+        groq_model=settings.GROQ_MODEL,
+        api_key_configured=key_configured,
         database_url_masked=masked_db,
         max_turns=settings.MAX_CONVERSATION_TURNS,
         ranking_weights={
@@ -65,8 +69,13 @@ def update_admin_config(
 ):
     if req.llm_provider:
         settings.LLM_PROVIDER = req.llm_provider
+    if req.groq_model:
+        settings.GROQ_MODEL = req.groq_model
     if req.gemini_model:
-        settings.GEMINI_MODEL = req.gemini_model
+        if settings.LLM_PROVIDER == "groq":
+            settings.GROQ_MODEL = req.gemini_model
+        else:
+            settings.GEMINI_MODEL = req.gemini_model
     if req.max_turns:
         settings.MAX_CONVERSATION_TURNS = req.max_turns
     if req.ranking_weights:

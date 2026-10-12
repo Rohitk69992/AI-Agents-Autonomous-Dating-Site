@@ -12,6 +12,7 @@ class HealthResponse(BaseModel):
 class AdminConfigResponse(BaseModel):
     llm_provider: str
     gemini_model: str
+    groq_model: Optional[str] = None
     api_key_configured: bool
     database_url_masked: str
     max_turns: int
@@ -20,6 +21,7 @@ class AdminConfigResponse(BaseModel):
 
 class UpdateConfigAdminRequest(BaseModel):
     llm_provider: Optional[str] = None
+    groq_model: Optional[str] = None
     gemini_model: Optional[str] = None
     max_turns: Optional[int] = None
     ranking_weights: Optional[Dict[str, float]] = None
