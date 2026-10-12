@@ -72,7 +72,7 @@ def test_groq_successful_text_generation():
         client_instance.chat.completions.create.return_value = mock_completion
         MockGroq.return_value = client_instance
 
-        provider = GroqLLMProvider(api_key="gsk_valid_test_key", model_name="llama-3.3-70b-versatile")
+        provider = GroqLLMProvider(api_key="gsk_valid_test_key", model_name="openai/gpt-oss-20b")
         result = provider.generate(
             system_prompt="You are a dating agent",
             user_prompt="Generate turn",
@@ -80,47 +80,52 @@ def test_groq_successful_text_generation():
         )
 
         assert result.provider == "groq"
-        assert result.model == "llama-3.3-70b-versatile"
+        assert result.model == "openai/gpt-oss-20b"
         assert result.tokens_input == 200
         assert result.tokens_output == 85
         assert result.tokens_total == 285
         assert result.cost_usd > 0
         assert result.structured_data == fake_json
 
+        # Verify max_completion_tokens was used in client call
+        called_kwargs = client_instance.chat.completions.create.call_args.kwargs
+        assert "max_completion_tokens" in called_kwargs
+        assert called_kwargs["max_completion_tokens"] <= 4096
+
 
 def test_groq_404_failover_without_retrying_same_model():
     """
-    When primary model (llama-3.3-70b-versatile) returns 404, provider must not retry it,
-    and must immediately fall back to the next candidate (llama-3.1-8b-instant).
+    When primary model (openai/gpt-oss-20b) returns 404, provider must not retry it,
+    and must immediately fall back to the next candidate (openai/gpt-oss-120b).
     """
     call_counts = {}
 
     def side_effect_create(**kwargs):
         model = kwargs.get("model")
         call_counts[model] = call_counts.get(model, 0) + 1
-        if model == "llama-3.3-70b-versatile":
-            err = Exception("404 The model 'llama-3.3-70b-versatile' does not exist or you do not have access to it.")
+        if model == "openai/gpt-oss-20b":
+            err = Exception("404 The model 'openai/gpt-oss-20b' does not exist or you do not have access to it.")
             setattr(err, "status_code", 404)
             raise err
-        return MockGroqCompletion(content=json.dumps({"message": "Hello from 8B instant"}))
+        return MockGroqCompletion(content=json.dumps({"message": "Hello from 120B"}))
 
     with patch("groq.Groq") as MockGroq:
         client_instance = MagicMock()
         client_instance.chat.completions.create.side_effect = side_effect_create
         MockGroq.return_value = client_instance
 
-        provider = GroqLLMProvider(api_key="gsk_test_key", model_name="llama-3.3-70b-versatile")
+        provider = GroqLLMProvider(api_key="gsk_test_key", model_name="openai/gpt-oss-20b")
         result = provider.generate(
             system_prompt="System",
             user_prompt="Say hi",
             response_schema={"type": "object"}
         )
 
-        # llama-3.3-70b-versatile should be attempted EXACTLY ONCE (no retry on 404)
-        assert call_counts["llama-3.3-70b-versatile"] == 1
-        assert call_counts["llama-3.1-8b-instant"] == 1
-        assert result.model == "llama-3.1-8b-instant"
-        assert result.structured_data == {"message": "Hello from 8B instant"}
+        # openai/gpt-oss-20b should be attempted EXACTLY ONCE (no retry on 404)
+        assert call_counts["openai/gpt-oss-20b"] == 1
+        assert call_counts["openai/gpt-oss-120b"] == 1
+        assert result.model == "openai/gpt-oss-120b"
+        assert result.structured_data == {"message": "Hello from 120B"}
 
 
 def test_groq_transient_error_retries_with_backoff(monkeypatch):
@@ -135,7 +140,7 @@ def test_groq_transient_error_retries_with_backoff(monkeypatch):
         nonlocal attempts
         attempts += 1
         if attempts == 1:
-            err = Exception("429 Rate limit reached for model llama-3.3-70b-versatile.")
+            err = Exception("429 Rate limit reached for model openai/gpt-oss-20b.")
             setattr(err, "status_code", 429)
             raise err
         return MockGroqCompletion(content=json.dumps({"message": "Success on retry"}))
@@ -145,7 +150,7 @@ def test_groq_transient_error_retries_with_backoff(monkeypatch):
         client_instance.chat.completions.create.side_effect = side_effect_create
         MockGroq.return_value = client_instance
 
-        provider = GroqLLMProvider(api_key="gsk_test_key", model_name="llama-3.3-70b-versatile")
+        provider = GroqLLMProvider(api_key="gsk_test_key", model_name="openai/gpt-oss-20b")
         result = provider.generate(
             system_prompt="System",
             user_prompt="User",
@@ -156,6 +161,37 @@ def test_groq_transient_error_retries_with_backoff(monkeypatch):
         assert len(sleeps) == 1
         assert sleeps[0] == 1.0
         assert result.structured_data == {"message": "Success on retry"}
+
+
+def test_groq_token_limit_error_skips_without_retry():
+    """
+    When a model rejects request because token limit exceeded, provider must not retry it,
+    and must skip immediately to the next candidate model.
+    """
+    call_counts = {}
+
+    def side_effect_create(**kwargs):
+        model = kwargs.get("model")
+        call_counts[model] = call_counts.get(model, 0) + 1
+        if model == "openai/gpt-oss-20b":
+            err = Exception("400 max_tokens cannot exceed the model limit of 512")
+            setattr(err, "status_code", 400)
+            raise err
+        return MockGroqCompletion(content=json.dumps({"message": "Success on fallback model"}))
+
+    with patch("groq.Groq") as MockGroq:
+        client_instance = MagicMock()
+        client_instance.chat.completions.create.side_effect = side_effect_create
+        MockGroq.return_value = client_instance
+
+        provider = GroqLLMProvider(api_key="gsk_test_key", model_name="openai/gpt-oss-20b")
+        result = provider.generate("System", "User", response_schema={"type": "object"})
+
+        # openai/gpt-oss-20b attempted exactly once (no retry on token limit error)
+        assert call_counts["openai/gpt-oss-20b"] == 1
+        assert call_counts["openai/gpt-oss-120b"] == 1
+        assert result.model == "openai/gpt-oss-120b"
+        assert result.structured_data == {"message": "Success on fallback model"}
 
 
 def test_groq_quota_exhaustion_sanitizes_api_keys(monkeypatch):
@@ -180,43 +216,54 @@ def test_groq_quota_exhaustion_sanitizes_api_keys(monkeypatch):
 
         err_msg = str(exc.value)
         assert "Groq generation failed after attempts across" in err_msg
-        assert "llama-3.3-70b-versatile" in err_msg
-        assert "llama-3.1-8b-instant" in err_msg
+        assert "openai/gpt-oss-20b" in err_msg
+        assert "openai/gpt-oss-120b" in err_msg
         assert "gsk_SecretGroqKey1234567890abcdef" not in err_msg
         assert "[REDACTED" in err_msg
 
 
-def test_groq_dynamic_discovery_fallback():
+def test_groq_dynamic_discovery_excludes_prompt_guard():
     """
-    When static candidate models return 404, dynamic discovery finds active models from models.list().
+    When static candidate models return 404, dynamic discovery excludes Prompt Guard
+    and other non-chat models, selecting only supported chat models.
     """
     class MockModelItem:
         def __init__(self, model_id: str):
             self.id = model_id
 
+    called_models = []
+
     def side_effect_create(**kwargs):
         model = kwargs.get("model")
+        called_models.append(model)
         if model in DEFAULT_GROQ_CANDIDATE_MODELS:
             err = Exception(f"404 Model '{model}' not found.")
             setattr(err, "status_code", 404)
             raise err
-        elif model == "llama-3.3-70b-dynamic":
+        elif model == "openai/gpt-oss-20b-dynamic":
             return MockGroqCompletion(content=json.dumps({"discovered": True}))
-        raise Exception("Unknown model")
+        raise Exception(f"Unexpected model call: {model}")
 
     with patch("groq.Groq") as MockGroq:
         client_instance = MagicMock()
         client_instance.chat.completions.create.side_effect = side_effect_create
         client_instance.models.list.return_value = MagicMock(data=[
-            MockModelItem("llama-3.3-70b-dynamic"),
-            MockModelItem("whisper-large-v3"),  # Non-text
+            MockModelItem("meta-llama/llama-prompt-guard-2-22m"),  # Must be skipped
+            MockModelItem("meta-llama/llama-prompt-guard-2-86m"),  # Must be skipped
+            MockModelItem("whisper-large-v3"),                    # Must be skipped
+            MockModelItem("openai/gpt-oss-20b-dynamic"),          # Chat model: accepted!
         ])
         MockGroq.return_value = client_instance
 
-        provider = GroqLLMProvider(api_key="gsk_test_key", model_name="llama-3.3-70b-versatile")
+        provider = GroqLLMProvider(api_key="gsk_test_key", model_name="openai/gpt-oss-20b")
         result = provider.generate("System", "User", response_schema={"type": "object"})
 
-        assert result.model == "llama-3.3-70b-dynamic"
+        # Prompt Guard models must NEVER have been called
+        assert "meta-llama/llama-prompt-guard-2-22m" not in called_models
+        assert "meta-llama/llama-prompt-guard-2-86m" not in called_models
+        assert "whisper-large-v3" not in called_models
+
+        assert result.model == "openai/gpt-oss-20b-dynamic"
         assert result.structured_data == {"discovered": True}
 
 

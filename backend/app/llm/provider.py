@@ -34,10 +34,15 @@ class LLMResponse:
         self.model = model
         self.provider = provider
         if provider == "groq":
-            if "70b" in (model or "").lower():
+            m_lower = (model or "").lower()
+            if "120b" in m_lower:
+                self.cost_usd = ((tokens_input / 1000.0) * 0.0005) + ((tokens_output / 1000.0) * 0.0015)
+            elif "20b" in m_lower:
+                self.cost_usd = ((tokens_input / 1000.0) * 0.00015) + ((tokens_output / 1000.0) * 0.0006)
+            elif "70b" in m_lower:
                 self.cost_usd = ((tokens_input / 1000.0) * 0.00059) + ((tokens_output / 1000.0) * 0.00079)
             else:
-                self.cost_usd = ((tokens_input / 1000.0) * 0.00005) + ((tokens_output / 1000.0) * 0.00008)
+                self.cost_usd = ((tokens_input / 1000.0) * 0.00015) + ((tokens_output / 1000.0) * 0.0006)
         else:
             self.cost_usd = (
                 (tokens_input / 1000.0) * PRICE_PER_1K_INPUT_USD
@@ -58,20 +63,26 @@ class BaseLLMProvider(ABC):
 
 
 DEFAULT_GROQ_CANDIDATE_MODELS = [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
+]
+
+# Blacklist of non-chat, safety classifier, and audio/embedding models that must NEVER be used for chat generation
+NON_CHAT_MODEL_KEYWORDS = [
+    "guard", "prompt-guard", "whisper", "embed", "vision",
+    "moderation", "rerank", "classifier", "safety", "tts", "asr"
 ]
 
 
 class GroqLLMProvider(BaseLLMProvider):
-    def __init__(self, api_key: str, model_name: str = "llama-3.3-70b-versatile"):
+    def __init__(self, api_key: str, model_name: str = "openai/gpt-oss-20b"):
         if not api_key:
             raise ValueError(
                 "GROQ_API_KEY must be provided for GroqLLMProvider. "
                 "For offline testing, configure LLM_PROVIDER='offline_mock'."
             )
         self.api_key = api_key.strip()
-        self.model_name = (model_name or "llama-3.3-70b-versatile").strip()
+        self.model_name = (model_name or "openai/gpt-oss-20b").strip()
         self.client = None
         self._init_client()
 
@@ -92,6 +103,27 @@ class GroqLLMProvider(BaseLLMProvider):
             or "model_not_found" in err_str
             or "not found" in err_str
             or "does not exist" in err_str
+        )
+
+    def _is_token_limit_error(self, err: Exception) -> bool:
+        err_str = str(err).lower()
+        return (
+            "exceeds their" in err_str
+            or "token limit" in err_str
+            or "max_tokens exceeds" in err_str
+            or "context length exceeded" in err_str
+            or "maximum context length" in err_str
+        )
+
+    def _is_auth_error(self, err: Exception) -> bool:
+        err_str = str(err).lower()
+        status_code = getattr(err, "status_code", None)
+        return (
+            status_code in (401, 403)
+            or "invalid_api_key" in err_str
+            or "authentication" in err_str
+            or "unauthorized" in err_str
+            or "forbidden" in err_str
         )
 
     def _is_transient(self, err: Exception) -> bool:
@@ -145,6 +177,7 @@ class GroqLLMProvider(BaseLLMProvider):
                 models_to_try.append(candidate)
 
         model_errors: Dict[str, str] = {}
+        token_cap = min(max_tokens, 4096)
 
         for current_model_name in models_to_try:
             for attempt in range(2):
@@ -156,21 +189,43 @@ class GroqLLMProvider(BaseLLMProvider):
                             {"role": "user", "content": prompt_combined},
                         ],
                         "temperature": temperature,
-                        "max_tokens": max_tokens,
+                        "max_completion_tokens": token_cap,
                     }
+                    if "gpt-oss" in current_model_name.lower() and response_schema:
+                        kwargs["reasoning_format"] = "parsed"
                     if response_schema:
                         kwargs["response_format"] = {"type": "json_object"}
 
-                    completion = self.client.chat.completions.create(**kwargs)
+                    try:
+                        completion = self.client.chat.completions.create(**kwargs)
+                    except Exception as call_err:
+                        err_str = str(call_err).lower()
+                        # Fallback for models or API versions requiring max_tokens instead of max_completion_tokens
+                        if "max_completion_tokens" in err_str and "max_completion_tokens" in kwargs:
+                            val = kwargs.pop("max_completion_tokens")
+                            kwargs["max_tokens"] = val
+                            completion = self.client.chat.completions.create(**kwargs)
+                        elif "reasoning_format" in err_str and "reasoning_format" in kwargs:
+                            kwargs.pop("reasoning_format", None)
+                            completion = self.client.chat.completions.create(**kwargs)
+                        else:
+                            raise call_err
+
                     latency_ms = int((time.time() - start_time) * 1000)
 
                     content = ""
+                    reasoning_text = ""
                     if completion.choices and len(completion.choices) > 0:
-                        content = completion.choices[0].message.content or ""
+                        msg = completion.choices[0].message
+                        content = getattr(msg, "content", "") or ""
+                        reasoning_text = getattr(msg, "reasoning", "") or ""
 
                     structured_data = None
                     if response_schema:
                         structured_data = self._extract_json(content)
+                        if structured_data and isinstance(structured_data, dict):
+                            if not structured_data.get("internal_thought") and reasoning_text:
+                                structured_data["internal_thought"] = reasoning_text
 
                     tokens_in = getattr(completion.usage, "prompt_tokens", 0) if completion.usage else len(system_prompt + prompt_combined) // 4
                     tokens_out = getattr(completion.usage, "completion_tokens", 0) if completion.usage else len(content) // 4
@@ -188,10 +243,22 @@ class GroqLLMProvider(BaseLLMProvider):
                     sanitized_msg = self._sanitize_error(e)
                     if self._is_not_found(e):
                         logger.warning(
-                            f"Groq model '{current_model_name}' returned 404/not found. "
+                            f"Groq model '{current_model_name}' returned 404 (not found). "
                             f"Immediately skipping to next candidate model. Detail: {sanitized_msg}"
                         )
                         model_errors[current_model_name] = f"404 Not Found: {sanitized_msg}"
+                        # Fast failover: do NOT retry a 404 model ID
+                        break
+                    elif self._is_token_limit_error(e):
+                        logger.warning(
+                            f"Groq model '{current_model_name}' rejected token limit: {sanitized_msg}. "
+                            f"Skipping model to prevent configuration mismatch loop."
+                        )
+                        model_errors[current_model_name] = f"Token Limit Exceeded: {sanitized_msg}"
+                        break
+                    elif self._is_auth_error(e):
+                        logger.warning(f"Groq authentication error with '{current_model_name}': {sanitized_msg}")
+                        model_errors[current_model_name] = f"Auth Error: {sanitized_msg}"
                         break
                     elif self._is_transient(e):
                         logger.warning(
@@ -217,27 +284,45 @@ class GroqLLMProvider(BaseLLMProvider):
                 data_list = getattr(models_page, "data", []) or []
                 for m in data_list:
                     m_id = getattr(m, "id", "")
-                    if m_id and m_id not in models_to_try and ("llama" in m_id.lower() or "mixtral" in m_id.lower()):
+                    if not m_id or m_id in models_to_try:
+                        continue
+                    m_lower = m_id.lower()
+                    # Strictly filter OUT Prompt Guard and non-chat classification/audio models
+                    if any(bad in m_lower for bad in NON_CHAT_MODEL_KEYWORDS):
+                        continue
+                    # Only accept verified chat/completion models
+                    if any(good in m_lower for good in ["gpt-oss", "chat", "instruct", "kimi", "qwen", "it"]):
                         discovered.append(m_id)
 
                 for disc_model in discovered[:2]:
                     try:
                         logger.info(f"Attempting dynamically discovered Groq model: '{disc_model}'")
-                        kwargs = {
+                        disc_kwargs: Dict[str, Any] = {
                             "model": disc_model,
                             "messages": [
                                 {"role": "system", "content": system_prompt},
                                 {"role": "user", "content": prompt_combined},
                             ],
                             "temperature": temperature,
-                            "max_tokens": max_tokens,
+                            "max_completion_tokens": token_cap,
                         }
                         if response_schema:
-                            kwargs["response_format"] = {"type": "json_object"}
+                            disc_kwargs["response_format"] = {"type": "json_object"}
 
-                        completion = self.client.chat.completions.create(**kwargs)
+                        try:
+                            completion = self.client.chat.completions.create(**disc_kwargs)
+                        except Exception as d_err:
+                            if "max_completion_tokens" in str(d_err).lower():
+                                val = disc_kwargs.pop("max_completion_tokens")
+                                disc_kwargs["max_tokens"] = val
+                                completion = self.client.chat.completions.create(**disc_kwargs)
+                            else:
+                                raise d_err
+
                         latency_ms = int((time.time() - start_time) * 1000)
-                        content = completion.choices[0].message.content or ""
+                        content = ""
+                        if completion.choices and len(completion.choices) > 0:
+                            content = completion.choices[0].message.content or ""
                         structured_data = self._extract_json(content) if response_schema else None
                         tokens_in = getattr(completion.usage, "prompt_tokens", 0) if completion.usage else 0
                         tokens_out = getattr(completion.usage, "completion_tokens", 0) if completion.usage else 0

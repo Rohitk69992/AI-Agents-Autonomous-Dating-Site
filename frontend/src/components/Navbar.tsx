@@ -81,10 +81,12 @@ export default function Navbar() {
                 <span className="text-slate-300 font-medium text-[11px]">
                   {health.llm_model
                     ? health.llm_model
+                        .replace(/openai\/gpt-oss-20b/i, "GPT-OSS 20B (Groq)")
+                        .replace(/openai\/gpt-oss-120b/i, "GPT-OSS 120B (Groq)")
                         .replace(/llama-3\.3-70b-versatile/i, "Llama 3.3 70B (Groq)")
                         .replace(/llama-3\.1-8b-instant/i, "Llama 3.1 8B (Groq)")
                         .replace(/gemini-2\.5-flash/i, "Gemini 2.5 Flash")
-                    : "Llama 3.3 70B (Groq)"}
+                    : "GPT-OSS 20B (Groq)"}
                 </span>
               </div>
             )}
