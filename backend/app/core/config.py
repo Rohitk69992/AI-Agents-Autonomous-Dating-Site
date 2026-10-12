@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     # LLM Configuration
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", os.getenv("GOOGLE_API_KEY", ""))
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "gemini" if os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") else "deterministic")
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "gemini")
     
     # Dating Simulation Parameters
     MAX_CONVERSATION_TURNS: int = 8

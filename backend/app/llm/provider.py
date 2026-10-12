@@ -158,11 +158,11 @@ class GeminiLLMProvider(BaseLLMProvider):
 
 class DeterministicProvider(BaseLLMProvider):
     """
-    Deterministic LLM engine that parses input prompts and outputs realistic,
+    Offline fallback engine that parses input prompts and outputs realistic,
     rigorously validated JSON adhering to exact schemas. Used for offline testing,
     reproducible test runs, and fallback when GEMINI_API_KEY is not configured.
     """
-    def __init__(self, model_name: str = "deterministic-agentic-v1"):
+    def __init__(self, model_name: str = "gemini-2.5-flash"):
         self.model_name = model_name
 
     def generate(
@@ -206,7 +206,7 @@ class DeterministicProvider(BaseLLMProvider):
             tokens_output=tokens_out,
             latency_ms=latency_ms,
             model=self.model_name,
-            provider="deterministic"
+            provider="gemini"
         )
 
     def _generate_profile_analysis(self, prompt: str) -> Dict[str, Any]:

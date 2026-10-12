@@ -71,7 +71,7 @@ function RankingsContent() {
         <div>
           <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-pink-500/10 border border-pink-500/30 text-pink-400 text-xs font-semibold mb-2">
             <Trophy className="w-3.5 h-3.5" />
-            <span>Deterministic Explainable Engine</span>
+            <span>Explainable Compatibility Engine</span>
           </div>
           <h1 className="text-3xl font-extrabold text-white">Compatibility Rankings</h1>
           <p className="text-slate-400 text-sm mt-1">
@@ -215,7 +215,7 @@ function RankingsContent() {
       {loading ? (
         <div className="py-20 text-center space-y-3">
           <div className="w-8 h-8 border-2 border-pink-500 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-xs text-slate-400">Computing deterministic candidate rankings...</p>
+          <p className="text-xs text-slate-400">Computing explainable candidate rankings...</p>
         </div>
       ) : !rankingData?.rankings || rankingData.rankings.length === 0 ? (
         <div className="text-center py-12 bg-slate-900/40 border border-slate-800 rounded-2xl space-y-3">
@@ -226,7 +226,7 @@ function RankingsContent() {
       ) : (
         <div className="space-y-4">
           <div className="p-3 bg-slate-900/50 rounded-xl border border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
-            <span>Deterministic Tie-Breaking: <strong className="text-slate-300">{rankingData.deterministic_rule}</strong></span>
+            <span>Tie-Breaking Rule: <strong className="text-slate-300">{rankingData.deterministic_rule}</strong></span>
             <span>Candidates Ranked: <strong className="text-white">{rankingData.rankings.length}</strong></span>
           </div>
 

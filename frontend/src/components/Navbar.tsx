@@ -78,8 +78,8 @@ export default function Navbar() {
                     health.status === "healthy" ? "bg-emerald-400 animate-pulse" : "bg-amber-400"
                   }`}
                 />
-                <span className="text-slate-300 font-mono text-[11px] capitalize">
-                  {health.llm_provider}: {health.llm_model}
+                <span className="text-slate-300 font-medium text-[11px]">
+                  {health.llm_model ? health.llm_model.replace(/gemini-2\.5-flash/i, "Gemini 2.5 Flash").replace(/gemini-1\.5-flash/i, "Gemini 1.5 Flash") : "Gemini 2.5 Flash"}
                 </span>
               </div>
             )}

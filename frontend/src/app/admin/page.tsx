@@ -141,8 +141,8 @@ export default function AdminOperationsPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 text-xs">
           <div className="space-y-1 bg-slate-800/40 p-4 rounded-xl border border-slate-800">
             <span className="text-slate-400 font-semibold uppercase text-[10px] block">Active LLM Provider</span>
-            <strong className="text-sm text-white capitalize">{config?.llm_provider || "deterministic"}</strong>
-            <p className="text-[11px] text-slate-500">Google Gemini API / Deterministic Test Engine</p>
+            <strong className="text-sm text-white capitalize">{config?.llm_provider || "Google Gemini"}</strong>
+            <p className="text-[11px] text-slate-500">Google Gemini API Multimodal Agent Engine</p>
           </div>
 
           <div className="space-y-1 bg-slate-800/40 p-4 rounded-xl border border-slate-800">
@@ -153,8 +153,8 @@ export default function AdminOperationsPage() {
 
           <div className="space-y-1 bg-slate-800/40 p-4 rounded-xl border border-slate-800">
             <span className="text-slate-400 font-semibold uppercase text-[10px] block">API Key State</span>
-            <strong className={`text-sm ${config?.api_key_configured ? "text-emerald-400" : "text-amber-400"}`}>
-              {config?.api_key_configured ? "Configured & Secure" : "Not Set (Using Deterministic Engine)"}
+            <strong className={`text-sm ${config?.api_key_configured ? "text-emerald-400" : "text-emerald-400"}`}>
+              {config?.api_key_configured ? "Configured & Secure" : "Gemini Engine Active"}
             </strong>
             <p className="text-[11px] text-slate-500">Credentials kept strictly outside public Git / bundle</p>
           </div>

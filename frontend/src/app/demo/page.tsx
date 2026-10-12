@@ -67,7 +67,7 @@ export default function CompletedDemoPage() {
           25-Participant Consenting Benchmark Demonstration
         </h1>
         <p className="text-slate-300 text-sm max-w-3xl leading-relaxed">
-          This permanent showcase contains 25 verified individuals, each with authentic public LinkedIn and Instagram profiles, mutual participation consent, traceable evidence, genuine agent-to-agent dating transcripts, and deterministic compatibility rankings.
+          This permanent showcase contains 25 verified individuals, each with authentic public LinkedIn and Instagram profiles, mutual participation consent, traceable evidence, genuine agent-to-agent dating transcripts, and explainable compatibility rankings.
         </p>
 
         {/* 3-Minute Video Storyboard Guide Pill */}
@@ -109,7 +109,7 @@ export default function CompletedDemoPage() {
         <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 space-y-1">
           <span className="text-xs text-slate-400 uppercase font-semibold">Ranking Engine</span>
           <div className="text-2xl font-bold text-emerald-400">100% Calculated</div>
-          <span className="text-[11px] text-slate-500">Deterministic Tie-Breaking</span>
+          <span className="text-[11px] text-slate-500">Mathematical Tie-Breaking</span>
         </div>
       </div>
 
