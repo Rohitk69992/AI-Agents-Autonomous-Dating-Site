@@ -1,5 +1,10 @@
-# Environments
+# Environments & Sensitive Config
 .env
+.env*
+*.env
+*.env*
+.env.example
+*.env.example
 .venv/
 env/
 __pycache__/
