@@ -53,6 +53,11 @@ class BaseLLMProvider(ABC):
 
 class GeminiLLMProvider(BaseLLMProvider):
     def __init__(self, api_key: str, model_name: str = "gemini-2.5-flash"):
+        if not api_key:
+            raise ValueError(
+                "GEMINI_API_KEY must be provided for GeminiLLMProvider. "
+                "For offline testing, configure LLM_PROVIDER='offline_mock'."
+            )
         self.api_key = api_key
         self.model_name = model_name
         self.client = None
@@ -61,15 +66,14 @@ class GeminiLLMProvider(BaseLLMProvider):
     def _init_client(self):
         try:
             import google.generativeai as genai
-            if self.api_key:
-                genai.configure(api_key=self.api_key)
-                self.client = genai.GenerativeModel(
-                    model_name=self.model_name,
-                    generation_config={"temperature": 0.7}
-                )
+            genai.configure(api_key=self.api_key)
+            self.client = genai.GenerativeModel(
+                model_name=self.model_name,
+                generation_config={"temperature": 0.7}
+            )
         except Exception as e:
             logger.error(f"Failed to initialize Gemini client: {e}")
-            self.client = None
+            raise RuntimeError(f"Failed to initialize Gemini GenerativeModel: {e}")
 
     def generate(
         self,
@@ -81,9 +85,7 @@ class GeminiLLMProvider(BaseLLMProvider):
     ) -> LLMResponse:
         start_time = time.time()
         if not self.client:
-            # Fallback to deterministic provider if client uninitialized
-            fallback = DeterministicProvider(model_name="fallback-deterministic")
-            return fallback.generate(system_prompt, user_prompt, temperature, max_tokens, response_schema)
+            raise RuntimeError("Gemini client is uninitialized. Verify GEMINI_API_KEY.")
 
         prompt_combined = f"{system_prompt}\n\nTask:\n{user_prompt}"
         if response_schema:
@@ -128,11 +130,10 @@ class GeminiLLMProvider(BaseLLMProvider):
                 )
             except Exception as e:
                 last_error = e
+                logger.warning(f"Gemini API attempt {attempt + 1} failed: {e}")
                 time.sleep(1.0 * (2 ** attempt))
 
-        logger.warning(f"Gemini generation failed after 3 attempts ({last_error}). Using deterministic engine.")
-        fallback = DeterministicProvider(model_name="fallback-deterministic")
-        return fallback.generate(system_prompt, user_prompt, temperature, max_tokens, response_schema)
+        raise RuntimeError(f"Gemini generation failed after 3 attempts: {last_error}")
 
     def _extract_json(self, text: str) -> Optional[Dict[str, Any]]:
         try:
@@ -156,13 +157,13 @@ class GeminiLLMProvider(BaseLLMProvider):
         return None
 
 
-class DeterministicProvider(BaseLLMProvider):
+class OfflineMockProvider(BaseLLMProvider):
     """
-    Offline fallback engine that parses input prompts and outputs realistic,
-    rigorously validated JSON adhering to exact schemas. Used for offline testing,
-    reproducible test runs, and fallback when GEMINI_API_KEY is not configured.
+    Offline mock engine that parses input prompts and outputs realistic,
+    rigorously validated JSON adhering to exact schemas. Used strictly for offline testing,
+    reproducible test runs, and environments where GEMINI_API_KEY is not configured.
     """
-    def __init__(self, model_name: str = "gemini-2.5-flash"):
+    def __init__(self, model_name: str = "offline-mock"):
         self.model_name = model_name
 
     def generate(
@@ -206,11 +207,10 @@ class DeterministicProvider(BaseLLMProvider):
             tokens_output=tokens_out,
             latency_ms=latency_ms,
             model=self.model_name,
-            provider="gemini"
+            provider="offline_mock"
         )
 
     def _generate_profile_analysis(self, prompt: str) -> Dict[str, Any]:
-        # Extract keywords from prompt
         return {
             "summary": "Professional software and product leader with passions for active outdoor exploration, photography, and open dialogue.",
             "career_interests": ["Artificial Intelligence", "Systems Architecture", "High-growth Startups"],
@@ -233,6 +233,8 @@ class DeterministicProvider(BaseLLMProvider):
     def _generate_dating_turn(self, prompt: str) -> Dict[str, Any]:
         return {
             "internal_thought": "I notice my date highlighted a passion for outdoor adventures and creative projects. I want to build on our shared energy around nature while asking about how they balance demanding work with leisure.",
+            "decision_summary": "Building on shared interest in outdoor lifestyle and inquiring about work-life balance.",
+            "decision_factors": ["Shared interest: nature/hiking", "Work-life balance inquiry", "Positive emotional tone"],
             "message": "It's wonderful to connect! I really resonated with your love for weekend hikes and creative projects. How do you usually like to recharge after a high-intensity week?",
             "question_asked": "How do you usually like to recharge after a high-intensity week?",
             "interest_referenced": "Weekend hikes and creative projects"
@@ -256,7 +258,20 @@ class DeterministicProvider(BaseLLMProvider):
         }
 
 
+# Backward-compatibility alias
+DeterministicProvider = OfflineMockProvider
+
+
 def get_llm_provider() -> BaseLLMProvider:
-    if settings.GEMINI_API_KEY and settings.LLM_PROVIDER == "gemini":
+    provider = (settings.LLM_PROVIDER or "offline_mock").lower().strip()
+    if provider == "gemini":
+        if not settings.GEMINI_API_KEY:
+            raise RuntimeError(
+                "LLM_PROVIDER is configured as 'gemini', but no GEMINI_API_KEY or GOOGLE_API_KEY is configured in the environment. "
+                "Set GEMINI_API_KEY in your environment, or configure LLM_PROVIDER='offline_mock' for offline execution."
+            )
         return GeminiLLMProvider(api_key=settings.GEMINI_API_KEY, model_name=settings.GEMINI_MODEL)
-    return DeterministicProvider(model_name="deterministic-engine")
+    elif provider in ("offline_mock", "mock", "deterministic"):
+        return OfflineMockProvider(model_name=settings.GEMINI_MODEL)
+    else:
+        raise ValueError(f"Unsupported LLM_PROVIDER '{settings.LLM_PROVIDER}'. Expected 'gemini' or 'offline_mock'.")

@@ -49,6 +49,11 @@ export default function CompletedDemoPage() {
     } catch (_) {}
   };
 
+  const isSyntheticCohort = participants.some((p) => p.is_synthetic);
+  const count = participants.length;
+  const theoreticalPairs = count > 1 ? Math.floor((count * (count - 1)) / 2) : 0;
+  const eligiblePairs = run?.total_eligible_pairs ?? theoreticalPairs;
+
   return (
     <div className="space-y-8">
       {/* Permanent Demonstration Header */}
@@ -56,25 +61,38 @@ export default function CompletedDemoPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-pink-500/10 border border-pink-500/30 text-pink-400 text-xs font-semibold">
             <Sparkles className="w-3.5 h-3.5" />
-            <span>Official Technical Evaluation Showcase</span>
+            <span>Technical Evaluation Showcase</span>
           </div>
-          <span className="text-xs font-mono text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">
-            &check; Persisted & Survives Server Restarts
-          </span>
+          <div className="flex items-center space-x-2">
+            {isSyntheticCohort ? (
+              <span className="text-xs font-mono text-amber-400 bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/20">
+                &bull; Synthetic Benchmark Fixtures
+              </span>
+            ) : (
+              <span className="text-xs font-mono text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">
+                &check; Verified Consenting Cohort
+              </span>
+            )}
+            <span className="text-xs font-mono text-slate-400 bg-slate-800/60 px-3 py-1 rounded-full border border-slate-700">
+              Persisted in Database
+            </span>
+          </div>
         </div>
 
         <h1 className="text-3xl sm:text-4xl font-extrabold text-white">
-          25-Participant Consenting Benchmark Demonstration
+          {count}-Participant {isSyntheticCohort ? "Benchmark Simulation Showcase" : "Consenting Demonstration"}
         </h1>
         <p className="text-slate-300 text-sm max-w-3xl leading-relaxed">
-          This permanent showcase contains 25 verified individuals, each with authentic public LinkedIn and Instagram profiles, mutual participation consent, traceable evidence, genuine agent-to-agent dating transcripts, and explainable compatibility rankings.
+          {isSyntheticCohort
+            ? "This demonstration showcase represents a reproducible benchmark dataset of 25 structured profiles with valid LinkedIn and Instagram URLs, recorded evidence, autonomous agent-to-agent dating sessions, and mathematically explainable compatibility rankings."
+            : "This showcase contains verified consenting individuals, each with authentic public LinkedIn and Instagram profiles, mutual participation consent, traceable evidence, genuine agent-to-agent dating transcripts, and explainable compatibility rankings."}
         </p>
 
         {/* 3-Minute Video Storyboard Guide Pill */}
         <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-300">
           <span className="font-semibold text-pink-400">Reviewer 3-Minute Video Guide Sequence:</span>
           <div className="flex flex-wrap gap-2 text-[11px] font-mono text-slate-400">
-            <span className="bg-slate-800 px-2 py-0.5 rounded">0:00-0:25 Roster (25 URLs)</span>
+            <span className="bg-slate-800 px-2 py-0.5 rounded">0:00-0:25 Roster ({count} URLs)</span>
             <span className="bg-slate-800 px-2 py-0.5 rounded">0:25-0:55 Profile Evidence</span>
             <span className="bg-slate-800 px-2 py-0.5 rounded">0:55-1:55 Agent Dialogue</span>
             <span className="bg-slate-800 px-2 py-0.5 rounded">1:55-2:35 Rankings</span>
@@ -86,18 +104,18 @@ export default function CompletedDemoPage() {
       {/* Dataset Summary Metrics */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 space-y-1">
-          <span className="text-xs text-slate-400 uppercase font-semibold">Consenting Roster</span>
+          <span className="text-xs text-slate-400 uppercase font-semibold">Active Roster</span>
           <div className="text-2xl font-bold text-white flex items-center space-x-2">
-            <span>{participants.length} Participants</span>
+            <span>{count} Participants</span>
             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           </div>
-          <span className="text-[11px] text-slate-500">50 Verified Profile URLs</span>
+          <span className="text-[11px] text-slate-500">{count * 2} Profile URLs (LI + IG)</span>
         </div>
 
         <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 space-y-1">
           <span className="text-xs text-slate-400 uppercase font-semibold">Theoretical Pairs</span>
-          <div className="text-2xl font-bold text-white">300 Unordered Pairs</div>
-          <span className="text-[11px] text-slate-500">25 &times; 24 / 2 Pairs</span>
+          <div className="text-2xl font-bold text-white">{theoreticalPairs} Unordered Pairs</div>
+          <span className="text-[11px] text-slate-500">{count} &times; {Math.max(0, count - 1)} / 2 Pairs</span>
         </div>
 
         <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 space-y-1">
@@ -113,15 +131,21 @@ export default function CompletedDemoPage() {
         </div>
       </div>
 
-      {/* 25 Participant Table */}
+      {/* Participant Table */}
       <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 space-y-4">
         <div className="flex items-center justify-between border-b border-slate-800 pb-4">
           <div>
-            <h2 className="text-base font-bold text-white">Consenting Demonstration Dataset (25 Real Profiles)</h2>
+            <h2 className="text-base font-bold text-white">
+              {isSyntheticCohort ? "Benchmark Demonstration Roster (25 Profiles)" : "Consenting Participant Roster"}
+            </h2>
             <p className="text-xs text-slate-400">Strictly 2 URLs per participant: LinkedIn + Instagram.</p>
           </div>
-          <span className="text-xs text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20 font-semibold">
-            &check; Consent Records Verified
+          <span className={`text-xs px-2.5 py-1 rounded-lg border font-semibold ${
+            isSyntheticCohort
+              ? "text-amber-400 bg-amber-500/10 border-amber-500/20"
+              : "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
+          }`}>
+            {isSyntheticCohort ? "Development Benchmark Mode" : "✓ Consent Records Verified"}
           </span>
         </div>
 
@@ -148,7 +172,20 @@ export default function CompletedDemoPage() {
                   }`}
                 >
                   <td className="py-2.5 px-3 font-mono text-slate-500">{idx + 1}</td>
-                  <td className="py-2.5 px-3 font-bold text-white whitespace-nowrap">{p.name}</td>
+                  <td className="py-2.5 px-3 font-bold text-white whitespace-nowrap">
+                    <div className="flex items-center space-x-2">
+                      <span>{p.name}</span>
+                      {p.is_synthetic ? (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                          SYNTHETIC
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                          VERIFIED
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td className="py-2.5 px-3 text-slate-400 whitespace-nowrap">
                     {p.age} yo &bull; {p.gender} &bull; {p.location}
                   </td>

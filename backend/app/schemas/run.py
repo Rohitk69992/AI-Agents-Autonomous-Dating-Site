@@ -1,6 +1,6 @@
 import datetime
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 class DemonstrationRunResponse(BaseModel):
     id: str
@@ -16,8 +16,7 @@ class DemonstrationRunResponse(BaseModel):
     completed_at: Optional[datetime.datetime] = None
     execution_summary: Dict[str, Any] = {}
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class StartRunRequest(BaseModel):
     run_id: Optional[str] = "demo-run-25-participants"

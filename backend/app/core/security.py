@@ -1,8 +1,11 @@
 import ipaddress
 import re
+import secrets
 import socket
 from urllib.parse import urlparse
-from typing import Tuple
+from typing import Tuple, Optional
+from fastapi import Header, HTTPException, status
+from app.core.config import settings
 
 LINKEDIN_URL_PATTERN = re.compile(
     r"^https?://(www\.)?linkedin\.com/in/([a-zA-Z0-9_\-\.%]+)/?$", re.IGNORECASE
@@ -90,3 +93,35 @@ def sanitize_text(text: str) -> str:
     cleaned = re.sub(r"<(script|iframe|object|embed)[^>]*>.*?</\1>", "", text, flags=re.IGNORECASE)
     cleaned = re.sub(r"<(script|iframe|object|embed)[^>]*/>", "", cleaned, flags=re.IGNORECASE)
     return cleaned.strip()
+
+
+def require_admin_auth(
+    x_admin_key: Optional[str] = Header(None, alias="X-Admin-Key"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+) -> bool:
+    """
+    Enforces admin authorization for administrative and destructive operations.
+    Supports either X-Admin-Key header or Authorization: Bearer <key>.
+    Uses constant-time comparison to prevent timing attacks.
+    """
+    provided_key = None
+    if x_admin_key:
+        provided_key = x_admin_key.strip()
+    elif authorization and authorization.lower().startswith("bearer "):
+        provided_key = authorization[7:].strip()
+
+    if not provided_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Admin authentication required. Provide 'X-Admin-Key' or 'Authorization: Bearer <key>'.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    expected_key = settings.ADMIN_API_KEY
+    if not expected_key or not secrets.compare_digest(provided_key, expected_key):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid admin credentials.",
+        )
+
+    return True

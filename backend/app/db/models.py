@@ -26,7 +26,12 @@ class Participant(Base):
     
     consent_status = Column(String(50), default="consented", nullable=False)
     consent_timestamp = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    consent_verified = Column(Boolean, default=False, nullable=False)
+    source_verified = Column(Boolean, default=False, nullable=False)
+    is_synthetic = Column(Boolean, default=False, nullable=False, index=True)
+    simulation_eligible = Column(Boolean, default=True, nullable=False)
     status = Column(String(50), default="pending", nullable=False)  # pending, analyzed, failed, withdrawn
+    analysis_status = Column(String(50), default="pending", nullable=False)
     
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
@@ -49,6 +54,8 @@ class EvidenceItem(Base):
     evidence_type = Column(String(50), nullable=False)  # explicit_statement, observed_activity, model_interpretation
     raw_quote = Column(Text, nullable=False)
     confidence = Column(Float, default=1.0, nullable=False)
+    is_synthetic = Column(Boolean, default=False, nullable=False, index=True)
+    processing_version = Column(String(50), default="1.0.0", nullable=False)
     retrieved_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
 
     participant = relationship("Participant", back_populates="evidence_items")
@@ -100,9 +107,10 @@ class EligibleCandidatePair(Base):
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
     run_id = Column(String(128), ForeignKey("demonstration_runs.id"), nullable=False, index=True)
-    participant_a_id = Column(String(36), ForeignKey("participants.id"), nullable=False)
-    participant_b_id = Column(String(36), ForeignKey("participants.id"), nullable=False)
+    participant_a_id = Column(String(36), ForeignKey("participants.id", ondelete="CASCADE"), nullable=False)
+    participant_b_id = Column(String(36), ForeignKey("participants.id", ondelete="CASCADE"), nullable=False)
     is_eligible = Column(Boolean, default=True, nullable=False)
+    is_synthetic = Column(Boolean, default=False, nullable=False)
     ineligibility_reason = Column(String(255), nullable=True)
     pair_status = Column(String(50), default="pending", nullable=False)  # pending, simulating, completed, failed, skipped
     session_id = Column(String(36), nullable=True)
@@ -117,8 +125,9 @@ class DatingSession(Base):
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
     run_id = Column(String(128), nullable=True, index=True)
-    participant_a_id = Column(String(36), ForeignKey("participants.id"), nullable=False, index=True)
-    participant_b_id = Column(String(36), ForeignKey("participants.id"), nullable=False, index=True)
+    participant_a_id = Column(String(36), ForeignKey("participants.id", ondelete="CASCADE"), nullable=False, index=True)
+    participant_b_id = Column(String(36), ForeignKey("participants.id", ondelete="CASCADE"), nullable=False, index=True)
+    is_synthetic = Column(Boolean, default=False, nullable=False, index=True)
     status = Column(String(50), default="initialized", nullable=False)  # initialized, in_progress, completed, incompatible, failed, cancelled
     
     current_turn = Column(Integer, default=0)
@@ -152,9 +161,11 @@ class ConversationMessage(Base):
     id = Column(String(36), primary_key=True, default=generate_uuid)
     session_id = Column(String(36), ForeignKey("dating_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
     turn_number = Column(Integer, nullable=False)
-    sender_participant_id = Column(String(36), ForeignKey("participants.id"), nullable=False)
+    sender_participant_id = Column(String(36), ForeignKey("participants.id", ondelete="CASCADE"), nullable=False)
     sender_agent_role = Column(String(20), nullable=False)  # "Agent A", "Agent B"
     content = Column(Text, nullable=False)
+    decision_summary = Column(Text, nullable=True)
+    decision_factors = Column(JSON, default=list)
     internal_thought = Column(Text, nullable=True)
     question_asked = Column(Text, nullable=True)
     interest_referenced = Column(String(255), nullable=True)
@@ -170,8 +181,8 @@ class AgentEvaluation(Base):
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
     session_id = Column(String(36), ForeignKey("dating_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
-    evaluator_participant_id = Column(String(36), ForeignKey("participants.id"), nullable=False)
-    target_participant_id = Column(String(36), ForeignKey("participants.id"), nullable=False)
+    evaluator_participant_id = Column(String(36), ForeignKey("participants.id", ondelete="CASCADE"), nullable=False)
+    target_participant_id = Column(String(36), ForeignKey("participants.id", ondelete="CASCADE"), nullable=False)
     
     chemistry_score = Column(Float, nullable=False)  # 1-10
     communication_comfort = Column(Float, nullable=False)  # 1-10
@@ -197,6 +208,7 @@ class CompatibilityRanking(Base):
     source_participant_id = Column(String(36), ForeignKey("participants.id", ondelete="CASCADE"), nullable=False, index=True)
     target_participant_id = Column(String(36), ForeignKey("participants.id", ondelete="CASCADE"), nullable=False, index=True)
     session_id = Column(String(36), ForeignKey("dating_sessions.id"), nullable=True)
+    is_synthetic = Column(Boolean, default=False, nullable=False, index=True)
     
     rank = Column(Integer, nullable=False)
     individual_score = Column(Float, nullable=False)  # Directional Score A -> B (0 - 100)

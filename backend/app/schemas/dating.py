@@ -1,6 +1,6 @@
 import datetime
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 class ConversationMessageResponse(BaseModel):
     id: str
@@ -9,14 +9,15 @@ class ConversationMessageResponse(BaseModel):
     sender_name: Optional[str] = None
     sender_agent_role: str
     content: str
+    decision_summary: Optional[str] = None
+    decision_factors: List[str] = []
     internal_thought: Optional[str] = None
     question_asked: Optional[str] = None
     interest_referenced: Optional[str] = None
     timestamp: datetime.datetime
     tokens: int = 0
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class AgentEvaluationResponse(BaseModel):
     id: str
@@ -34,8 +35,7 @@ class AgentEvaluationResponse(BaseModel):
     unanswered_questions: List[str] = []
     created_at: datetime.datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class StartDatingSessionRequest(BaseModel):
     participant_a_id: str
@@ -50,6 +50,7 @@ class DatingSessionResponse(BaseModel):
     participant_a_name: Optional[str] = None
     participant_b_id: str
     participant_b_name: Optional[str] = None
+    is_synthetic: bool = False
     status: str
     current_turn: int
     total_turns: int
@@ -69,5 +70,4 @@ class DatingSessionResponse(BaseModel):
     messages: List[ConversationMessageResponse] = []
     evaluations: List[AgentEvaluationResponse] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

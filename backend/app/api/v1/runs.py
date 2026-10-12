@@ -8,13 +8,15 @@ from app.db.models import DemonstrationRun, EligibleCandidatePair, Participant, 
 from app.schemas.run import DemonstrationRunResponse, StartRunRequest, RunProgressResponse
 from app.worker.manager import worker_manager
 from app.dating.harness import check_eligibility
+from app.core.security import require_admin_auth
 
 router = APIRouter(prefix="/runs", tags=["Demonstration Runs"])
 
 @router.post("", response_model=DemonstrationRunResponse, status_code=status.HTTP_202_ACCEPTED)
 def start_demonstration_run(
     req: StartRunRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_admin_auth)
 ):
     run_id = req.run_id or "demo-run-25-participants"
     run = db.query(DemonstrationRun).filter(DemonstrationRun.id == run_id).first()
@@ -33,7 +35,7 @@ def start_demonstration_run(
     if not run:
         run = DemonstrationRun(
             id=run_id,
-            name=req.name or f"Official Demonstration Simulation ({len(participants)} Participants)",
+            name=req.name or f"Demonstration Simulation ({len(participants)} Participants)",
             status="pending",
             total_participants=len(participants),
             started_at=datetime.datetime.utcnow()
@@ -43,7 +45,7 @@ def start_demonstration_run(
         db.refresh(run)
 
     # Generate all unordered candidate pairs (N * (N-1) / 2)
-    pair_count = 0
+    eligible_count = 0
     for i in range(len(participants)):
         for j in range(i + 1, len(participants)):
             p_a = participants[i]
@@ -58,32 +60,38 @@ def start_demonstration_run(
 
             if not existing_pair:
                 is_el, inelig_reason = check_eligibility(p_a, p_b)
+                is_synth = bool(getattr(p_a, "is_synthetic", False) or getattr(p_b, "is_synthetic", False))
                 pair = EligibleCandidatePair(
                     run_id=run_id,
                     participant_a_id=p_a.id,
                     participant_b_id=p_b.id,
                     is_eligible=is_el,
+                    is_synthetic=is_synth,
                     ineligibility_reason=inelig_reason,
                     pair_status="pending" if is_el else "skipped"
                 )
                 db.add(pair)
-            pair_count += 1
+                if is_el:
+                    eligible_count += 1
+            else:
+                if existing_pair.is_eligible:
+                    eligible_count += 1
 
-    run.total_eligible_pairs = pair_count
+    run.total_eligible_pairs = eligible_count
     run.total_participants = len(participants)
     db.commit()
 
     # Launch background simulation job
     job_id = worker_manager.enqueue_job("demonstration_run", {"run_id": run_id, "max_turns": 4})
     
-    return DemonstrationRunResponse.from_orm(run)
+    return DemonstrationRunResponse.model_validate(run)
 
 @router.get("/{run_id}", response_model=DemonstrationRunResponse)
 def get_run(run_id: str, db: Session = Depends(get_db)):
     run = db.query(DemonstrationRun).filter(DemonstrationRun.id == run_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Demonstration run not found")
-    return DemonstrationRunResponse.from_orm(run)
+    return DemonstrationRunResponse.model_validate(run)
 
 @router.get("/{run_id}/progress", response_model=RunProgressResponse)
 def get_run_progress(run_id: str, db: Session = Depends(get_db)):
@@ -110,7 +118,11 @@ def get_run_progress(run_id: str, db: Session = Depends(get_db)):
     )
 
 @router.post("/{run_id}/resume", response_model=DemonstrationRunResponse)
-def resume_run(run_id: str, db: Session = Depends(get_db)):
+def resume_run(
+    run_id: str,
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_admin_auth)
+):
     run = db.query(DemonstrationRun).filter(DemonstrationRun.id == run_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Demonstration run not found")
@@ -118,9 +130,9 @@ def resume_run(run_id: str, db: Session = Depends(get_db)):
     worker_manager.enqueue_job("demonstration_run", {"run_id": run_id, "max_turns": 4})
     run.status = "running"
     db.commit()
-    return DemonstrationRunResponse.from_orm(run)
+    return DemonstrationRunResponse.model_validate(run)
 
 @router.get("", response_model=List[DemonstrationRunResponse])
 def list_runs(db: Session = Depends(get_db)):
     runs = db.query(DemonstrationRun).order_by(DemonstrationRun.started_at.desc()).all()
-    return [DemonstrationRunResponse.from_orm(r) for r in runs]
+    return [DemonstrationRunResponse.model_validate(r) for r in runs]

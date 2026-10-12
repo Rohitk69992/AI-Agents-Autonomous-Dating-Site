@@ -7,16 +7,46 @@ from app.db.session import get_db
 from app.db.models import Participant, EvidenceItem, AnalyzedProfile
 from app.schemas.participant import (
     ParticipantCreate, ParticipantBatchCreate, ParticipantResponse,
-    EvidenceItemResponse, AnalyzedProfileResponse
+    EvidenceItemResponse, AnalyzedProfileResponse,
+    ManifestImportRequest, ManifestImportResponse
 )
 from app.core.security import (
-    validate_and_normalize_linkedin_url, validate_and_normalize_instagram_url
+    validate_and_normalize_linkedin_url, validate_and_normalize_instagram_url,
+    require_admin_auth
 )
 from app.adapters.linkedin import LinkedInAcquisitionAdapter
 from app.adapters.instagram import InstagramAcquisitionAdapter
 from app.analysis.analyzer import analyze_participant_profile
 
 router = APIRouter(prefix="/participants", tags=["Participants"])
+
+def _build_participant_response(p: Participant) -> ParticipantResponse:
+    analyzed_resp = None
+    if p.analyzed_profile:
+        analyzed_resp = AnalyzedProfileResponse.model_validate(p.analyzed_profile)
+    return ParticipantResponse(
+        id=p.id,
+        name=p.name,
+        age=p.age,
+        gender=p.gender,
+        target_gender=p.target_gender,
+        location=p.location,
+        linkedin_url=p.linkedin_url,
+        linkedin_handle=p.linkedin_handle,
+        instagram_url=p.instagram_url,
+        instagram_handle=p.instagram_handle,
+        consent_status=p.consent_status,
+        consent_timestamp=p.consent_timestamp,
+        consent_verified=bool(getattr(p, "consent_verified", False)),
+        source_verified=bool(getattr(p, "source_verified", False)),
+        is_synthetic=bool(getattr(p, "is_synthetic", False)),
+        simulation_eligible=bool(getattr(p, "simulation_eligible", True)),
+        status=p.status,
+        analysis_status=getattr(p, "analysis_status", "pending") or "pending",
+        created_at=p.created_at,
+        analyzed_profile=analyzed_resp,
+        evidence_count=len(p.evidence_items)
+    )
 
 @router.post("", response_model=ParticipantResponse, status_code=status.HTTP_201_CREATED)
 def create_participant(
@@ -71,7 +101,12 @@ def create_participant(
         instagram_handle=ig_handle,
         consent_status="consented",
         consent_timestamp=datetime.datetime.utcnow(),
-        status="pending"
+        consent_verified=True,
+        source_verified=False,
+        is_synthetic=False,
+        simulation_eligible=True,
+        status="pending",
+        analysis_status="pending"
     )
     db.add(participant)
     db.commit()
@@ -90,7 +125,9 @@ def create_participant(
             category=item.category,
             evidence_type=item.evidence_type,
             raw_quote=item.raw_quote,
-            confidence=item.confidence
+            confidence=item.confidence,
+            is_synthetic=False,
+            processing_version="1.0.0"
         ))
 
     ig_res = ig_adapter.acquire(norm_ig, ig_handle)
@@ -102,7 +139,9 @@ def create_participant(
             category=item.category,
             evidence_type=item.evidence_type,
             raw_quote=item.raw_quote,
-            confidence=item.confidence
+            confidence=item.confidence,
+            is_synthetic=False,
+            processing_version="1.0.0"
         ))
 
     db.commit()
@@ -110,23 +149,87 @@ def create_participant(
 
     # Trigger initial analysis
     analyze_participant_profile(db, participant.id)
+    db.refresh(participant)
 
-    return ParticipantResponse(
-        id=participant.id,
-        name=participant.name,
-        age=participant.age,
-        gender=participant.gender,
-        target_gender=participant.target_gender,
-        location=participant.location,
-        linkedin_url=participant.linkedin_url,
-        linkedin_handle=participant.linkedin_handle,
-        instagram_url=participant.instagram_url,
-        instagram_handle=participant.instagram_handle,
-        consent_status=participant.consent_status,
-        consent_timestamp=participant.consent_timestamp,
-        status=participant.status,
-        created_at=participant.created_at,
-        evidence_count=len(participant.evidence_items)
+    return _build_participant_response(participant)
+
+@router.post("/import-manifest", response_model=ManifestImportResponse, status_code=status.HTTP_200_OK)
+def import_participant_manifest(
+    req: ManifestImportRequest,
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_admin_auth)
+):
+    imported_ids = []
+    errors = []
+    skipped = 0
+
+    for item in req.participants:
+        valid_li, norm_li, li_handle = validate_and_normalize_linkedin_url(item.linkedin_url)
+        valid_ig, norm_ig, ig_handle = validate_and_normalize_instagram_url(item.instagram_url)
+        if not valid_li or not valid_ig:
+            errors.append(f"Invalid URLs for {item.name}: {item.linkedin_url}, {item.instagram_url}")
+            skipped += 1
+            continue
+
+        existing = db.query(Participant).filter(
+            (Participant.linkedin_url == norm_li) | (Participant.instagram_url == norm_ig)
+        ).first()
+        if existing:
+            skipped += 1
+            continue
+
+        p = Participant(
+            name=item.name.strip(),
+            age=item.age,
+            gender=item.gender,
+            target_gender=item.target_gender,
+            location=item.location,
+            linkedin_url=norm_li,
+            linkedin_handle=li_handle,
+            instagram_url=norm_ig,
+            instagram_handle=ig_handle,
+            consent_status="consented",
+            consent_timestamp=datetime.datetime.utcnow(),
+            consent_verified=item.consent_verified,
+            source_verified=item.source_verified,
+            is_synthetic=False,
+            simulation_eligible=True,
+            status="pending",
+            analysis_status="pending"
+        )
+        db.add(p)
+        db.commit()
+        db.refresh(p)
+
+        for ev in item.evidence:
+            ev_item = EvidenceItem(
+                participant_id=p.id,
+                source_platform=ev.platform,
+                source_url=norm_li if ev.platform == "linkedin" else norm_ig,
+                category=ev.category,
+                evidence_type=ev.type,
+                raw_quote=ev.quote,
+                confidence=ev.confidence,
+                is_synthetic=False,
+                processing_version="1.0.0",
+                retrieved_at=datetime.datetime.utcnow()
+            )
+            db.add(ev_item)
+        db.commit()
+
+        if req.run_immediate_analysis:
+            try:
+                analyze_participant_profile(db, p.id)
+            except Exception as e:
+                errors.append(f"Analysis failed for {p.name}: {str(e)}")
+
+        imported_ids.append(p.id)
+
+    return ManifestImportResponse(
+        imported_count=len(imported_ids),
+        skipped_count=skipped,
+        errors=errors,
+        imported_participant_ids=imported_ids
     )
 
 @router.get("", response_model=List[ParticipantResponse])
@@ -144,63 +247,21 @@ def list_participants(
         query = query.filter(Participant.status == status_filter)
 
     participants = query.order_by(Participant.created_at.desc()).offset(skip).limit(limit).all()
-    
-    results = []
-    for p in participants:
-        analyzed_resp = None
-        if p.analyzed_profile:
-            analyzed_resp = AnalyzedProfileResponse.from_orm(p.analyzed_profile)
-        results.append(ParticipantResponse(
-            id=p.id,
-            name=p.name,
-            age=p.age,
-            gender=p.gender,
-            target_gender=p.target_gender,
-            location=p.location,
-            linkedin_url=p.linkedin_url,
-            linkedin_handle=p.linkedin_handle,
-            instagram_url=p.instagram_url,
-            instagram_handle=p.instagram_handle,
-            consent_status=p.consent_status,
-            consent_timestamp=p.consent_timestamp,
-            status=p.status,
-            created_at=p.created_at,
-            analyzed_profile=analyzed_resp,
-            evidence_count=len(p.evidence_items)
-        ))
-    return results
+    return [_build_participant_response(p) for p in participants]
 
 @router.get("/{participant_id}", response_model=ParticipantResponse)
 def get_participant(participant_id: str, db: Session = Depends(get_db)):
     p = db.query(Participant).filter(Participant.id == participant_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Participant not found")
-    
-    analyzed_resp = None
-    if p.analyzed_profile:
-        analyzed_resp = AnalyzedProfileResponse.from_orm(p.analyzed_profile)
-
-    return ParticipantResponse(
-        id=p.id,
-        name=p.name,
-        age=p.age,
-        gender=p.gender,
-        target_gender=p.target_gender,
-        location=p.location,
-        linkedin_url=p.linkedin_url,
-        linkedin_handle=p.linkedin_handle,
-        instagram_url=p.instagram_url,
-        instagram_handle=p.instagram_handle,
-        consent_status=p.consent_status,
-        consent_timestamp=p.consent_timestamp,
-        status=p.status,
-        created_at=p.created_at,
-        analyzed_profile=analyzed_resp,
-        evidence_count=len(p.evidence_items)
-    )
+    return _build_participant_response(p)
 
 @router.delete("/{participant_id}", status_code=status.HTTP_200_OK)
-def delete_or_withdraw_participant(participant_id: str, db: Session = Depends(get_db)):
+def delete_or_withdraw_participant(
+    participant_id: str,
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_admin_auth)
+):
     p = db.query(Participant).filter(Participant.id == participant_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Participant not found")
@@ -215,16 +276,16 @@ def trigger_analysis(participant_id: str, db: Session = Depends(get_db)):
     analyzed = analyze_participant_profile(db, participant_id)
     if not analyzed:
         raise HTTPException(status_code=404, detail="Failed to analyze participant.")
-    return AnalyzedProfileResponse.from_orm(analyzed)
+    return AnalyzedProfileResponse.model_validate(analyzed)
 
 @router.get("/{participant_id}/profile", response_model=AnalyzedProfileResponse)
 def get_participant_profile(participant_id: str, db: Session = Depends(get_db)):
     p = db.query(Participant).filter(Participant.id == participant_id).first()
     if not p or not p.analyzed_profile:
         raise HTTPException(status_code=404, detail="Profile analysis not found for participant.")
-    return AnalyzedProfileResponse.from_orm(p.analyzed_profile)
+    return AnalyzedProfileResponse.model_validate(p.analyzed_profile)
 
 @router.get("/{participant_id}/evidence", response_model=List[EvidenceItemResponse])
 def get_participant_evidence(participant_id: str, db: Session = Depends(get_db)):
     evidence = db.query(EvidenceItem).filter(EvidenceItem.participant_id == participant_id).all()
-    return [EvidenceItemResponse.from_orm(item) for item in evidence]
+    return [EvidenceItemResponse.model_validate(item) for item in evidence]

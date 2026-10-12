@@ -1,4 +1,5 @@
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -6,9 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.db.base import Base
-from app.db.session import engine, SessionLocal
-from app.db.models import Participant
-from app.db.seed_demo import seed_database
+from app.db.session import engine
 from app.api.v1.participants import router as participants_router
 from app.api.v1.dates import router as dates_router
 from app.api.v1.rankings import router as rankings_router
@@ -25,20 +24,7 @@ logger = logging.getLogger("agentic_dating")
 async def lifespan(app: FastAPI):
     logger.info("Initializing database schema...")
     Base.metadata.create_all(bind=engine)
-    
-    # Auto-seed demonstration run if database is empty
-    db = SessionLocal()
-    try:
-        count = db.query(Participant).count()
-        if count == 0:
-            logger.info("Database is empty. Automatically initializing the 25-participant demonstration dataset...")
-            seed_database(db=db, run_simulation=True)
-            logger.info("Automatic seeding complete.")
-    except Exception as e:
-        logger.error(f"Error during initial seed: {e}")
-    finally:
-        db.close()
-
+    logger.info("Database schema initialized successfully.")
     yield
     logger.info("Application shutting down.")
 
@@ -52,10 +38,11 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS configuration
+# CORS configuration: strict allowed origins with regex fallback for preview domains
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Permits local dev and preview hosts
+    allow_origins=settings.BACKEND_CORS_ORIGINS,
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -70,10 +57,14 @@ app.include_router(admin_router, prefix=settings.API_V1_STR)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    logger.exception(f"Unhandled error processing {request.method} {request.url}: {exc}")
+    correlation_id = str(uuid.uuid4())
+    logger.exception(f"Unhandled error [{correlation_id}] processing {request.method} {request.url}: {exc}")
     return JSONResponse(
         status_code=500,
-        content={"detail": "An internal server error occurred.", "error": str(exc)}
+        content={
+            "detail": "An internal server error occurred.",
+            "correlation_id": correlation_id
+        }
     )
 
 @app.get("/")

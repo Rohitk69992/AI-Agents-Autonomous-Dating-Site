@@ -168,21 +168,32 @@ export default function SessionReplayPage() {
                     </div>
                   )}
 
-                  {msg.internal_thought && (
+                  {(msg.decision_summary || msg.internal_thought) && (
                     <div className="pt-1">
                       <button
                         onClick={() => toggleThought(msg.turn_number)}
                         className="inline-flex items-center space-x-1.5 text-[10px] text-slate-400 hover:text-pink-300 font-mono transition-colors"
                       >
                         <Brain className="w-3 h-3 text-pink-400" />
-                        <span>{isThoughtOpen ? "Hide Agent Reasoning" : "Inspect Agent Internal Reasoning"}</span>
+                        <span>{isThoughtOpen ? "Hide Decision Factors" : "Inspect Decision Strategy"}</span>
                       </button>
                       {isThoughtOpen && (
-                        <div className="mt-2 p-3 rounded-lg bg-slate-950/80 border border-slate-800 text-[11px] font-mono text-slate-300 space-y-1">
+                        <div className="mt-2 p-3 rounded-lg bg-slate-950/80 border border-slate-800 text-[11px] font-mono text-slate-300 space-y-1.5">
                           <span className="text-[10px] uppercase font-bold text-pink-400 block tracking-wider">
-                            Observable Decision Reasoning:
+                            Observable Decision Factors:
                           </span>
-                          <p className="italic">{msg.internal_thought}</p>
+                          <p className="leading-relaxed text-slate-200">
+                            {msg.decision_summary || msg.internal_thought}
+                          </p>
+                          {msg.decision_factors && msg.decision_factors.length > 0 && (
+                            <div className="flex flex-wrap gap-1 pt-1">
+                              {msg.decision_factors.map((f: string, fi: number) => (
+                                <span key={fi} className="px-1.5 py-0.5 rounded bg-slate-800 text-[9px] text-slate-300 border border-slate-700">
+                                  {f}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

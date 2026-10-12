@@ -38,6 +38,8 @@ export default function ParticipantProfilePage() {
     loadData();
   }, [id]);
 
+  const [deleting, setDeleting] = useState(false);
+
   const handleReanalyze = async () => {
     setReanalyzing(true);
     try {
@@ -47,6 +49,23 @@ export default function ParticipantProfilePage() {
       console.error("Reanalysis failed:", err);
     } finally {
       setReanalyzing(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!participant) return;
+    const ok = window.confirm(
+      `Permanently delete participant "${participant.name}"?\n\nThis complies with right-to-be-forgotten privacy policy and will delete all associated date records and rankings.`
+    );
+    if (!ok) return;
+
+    setDeleting(true);
+    try {
+      await api.deleteParticipant(participant.id);
+      router.push("/participants");
+    } catch (err: any) {
+      alert(`Failed to delete participant: ${err.message || err}`);
+      setDeleting(false);
     }
   };
 
@@ -114,6 +133,15 @@ export default function ParticipantProfilePage() {
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                   Consented
                 </span>
+                {participant.is_synthetic ? (
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                    Synthetic Fixture
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                    Verified Record
+                  </span>
+                )}
               </h1>
               <p className="text-xs text-slate-400">
                 {participant.location || "California"} &bull; {participant.age || 28} years old &bull; Gender: {participant.gender || "Open"} &bull; Seeking: {participant.target_gender || "Open"}
@@ -121,8 +149,15 @@ export default function ParticipantProfilePage() {
             </div>
           </div>
 
-          {/* Social Proof URLs */}
-          <div className="flex flex-wrap gap-2 text-xs">
+          {/* Social Proof URLs & Actions */}
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 px-3 py-1.5 rounded-lg border border-rose-500/30 flex items-center space-x-1.5 transition-colors disabled:opacity-50"
+            >
+              <span>{deleting ? "Removing..." : "Withdraw / Delete"}</span>
+            </button>
             <a
               href={participant.linkedin_url}
               target="_blank"

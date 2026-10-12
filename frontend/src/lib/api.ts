@@ -1,4 +1,5 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const ADMIN_API_KEY = process.env.NEXT_PUBLIC_ADMIN_API_KEY || "dev-admin-secret-key";
 
 export async function fetchJson(endpoint: string, options: RequestInit = {}) {
   const url = `${API_BASE}${endpoint}`;
@@ -51,7 +52,18 @@ export const api = {
     location?: string;
   }) => fetchJson("/participants", { method: "POST", body: JSON.stringify(data) }),
 
-  deleteParticipant: (id: string) => fetchJson(`/participants/${id}`, { method: "DELETE" }),
+  deleteParticipant: (id: string, adminKey?: string) =>
+    fetchJson(`/participants/${id}`, {
+      method: "DELETE",
+      headers: { "X-Admin-Key": adminKey || ADMIN_API_KEY },
+    }),
+
+  importManifest: (data: any, adminKey?: string) =>
+    fetchJson("/participants/import-manifest", {
+      method: "POST",
+      headers: { "X-Admin-Key": adminKey || ADMIN_API_KEY },
+      body: JSON.stringify(data),
+    }),
 
   triggerAnalysis: (id: string) => fetchJson(`/participants/${id}/analyze`, { method: "POST" }),
 
@@ -91,10 +103,18 @@ export const api = {
 
   getRunProgress: (runId: string) => fetchJson(`/runs/${runId}/progress`),
 
-  startRun: (data: { run_id?: string; name?: string }) =>
-    fetchJson("/runs", { method: "POST", body: JSON.stringify(data) }),
+  startRun: (data: { run_id?: string; name?: string }, adminKey?: string) =>
+    fetchJson("/runs", {
+      method: "POST",
+      headers: { "X-Admin-Key": adminKey || ADMIN_API_KEY },
+      body: JSON.stringify(data),
+    }),
 
-  resumeRun: (runId: string) => fetchJson(`/runs/${runId}/resume`, { method: "POST" }),
+  resumeRun: (runId: string, adminKey?: string) =>
+    fetchJson(`/runs/${runId}/resume`, {
+      method: "POST",
+      headers: { "X-Admin-Key": adminKey || ADMIN_API_KEY },
+    }),
 
   // Admin & Health
   getHealth: () => fetchJson("/health"),
@@ -103,7 +123,16 @@ export const api = {
 
   getAdminConfig: () => fetchJson("/admin/config"),
 
-  updateAdminConfig: (data: any) => fetchJson("/admin/config", { method: "POST", body: JSON.stringify(data) }),
+  updateAdminConfig: (data: any, adminKey?: string) =>
+    fetchJson("/admin/config", {
+      method: "POST",
+      headers: { "X-Admin-Key": adminKey || ADMIN_API_KEY },
+      body: JSON.stringify(data),
+    }),
 
-  seedDemo: () => fetchJson("/admin/seed-demo", { method: "POST" }),
+  seedDemo: (adminKey?: string) =>
+    fetchJson("/admin/seed-demo", {
+      method: "POST",
+      headers: { "X-Admin-Key": adminKey || ADMIN_API_KEY },
+    }),
 };

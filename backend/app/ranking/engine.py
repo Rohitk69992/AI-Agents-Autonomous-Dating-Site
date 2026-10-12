@@ -239,11 +239,14 @@ def calculate_rankings_for_participant(
 
     rankings: List[CompatibilityRanking] = []
     for rank_idx, item in enumerate(candidate_scores, start=1):
+        target_p = item["target_participant"]
+        is_synth = bool(p_a.is_synthetic or target_p.is_synthetic)
         ranking_rec = CompatibilityRanking(
             run_id=run_id,
             source_participant_id=p_a.id,
-            target_participant_id=item["target_participant"].id,
+            target_participant_id=target_p.id,
             session_id=item["session_id"],
+            is_synthetic=is_synth,
             rank=rank_idx,
             individual_score=item["individual_score"],
             reciprocal_score=item["reciprocal_score"],

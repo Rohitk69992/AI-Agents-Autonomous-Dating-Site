@@ -126,9 +126,20 @@ export default function ParticipantsDirectoryPage() {
                         </p>
                       </div>
                     </div>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                      Consented
-                    </span>
+                    <div className="flex flex-col items-end gap-1">
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        Consented
+                      </span>
+                      {p.is_synthetic ? (
+                        <span className="px-2 py-0.5 rounded text-[9px] font-mono bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                          SYNTHETIC
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded text-[9px] font-mono bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                          VERIFIED
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {/* Summary Snippet */}

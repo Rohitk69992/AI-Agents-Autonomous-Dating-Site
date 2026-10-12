@@ -43,6 +43,7 @@ def get_participant_rankings(
             source_participant_id=r.source_participant_id,
             target_participant_id=r.target_participant_id,
             target_name=target.name if target else "Unknown",
+            is_synthetic=bool(r.is_synthetic),
             individual_score=r.individual_score,
             reciprocal_score=r.reciprocal_score,
             preference_score=r.preference_score,
@@ -80,7 +81,7 @@ def recalculate_participant_rankings(
     run_id: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    weights = weights_req.dict()
+    weights = weights_req.model_dump()
     records = calculate_rankings_for_participant(db, participant_id, run_id=run_id, weights_override=weights)
     p = db.query(Participant).filter(Participant.id == participant_id).first()
 
@@ -93,6 +94,7 @@ def recalculate_participant_rankings(
             source_participant_id=r.source_participant_id,
             target_participant_id=r.target_participant_id,
             target_name=target.name if target else "Unknown",
+            is_synthetic=bool(r.is_synthetic),
             individual_score=r.individual_score,
             reciprocal_score=r.reciprocal_score,
             preference_score=r.preference_score,

@@ -1,6 +1,6 @@
 import datetime
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 class CandidateRankingResponse(BaseModel):
     id: str
@@ -8,6 +8,7 @@ class CandidateRankingResponse(BaseModel):
     source_participant_id: str
     target_participant_id: str
     target_name: str
+    is_synthetic: bool = False
     individual_score: float
     reciprocal_score: float
     preference_score: float
@@ -23,8 +24,7 @@ class CandidateRankingResponse(BaseModel):
     session_id: Optional[str] = None
     calculated_at: datetime.datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class ParticipantRankingsListResponse(BaseModel):
     source_participant_id: str

@@ -41,7 +41,8 @@ export default function DashboardPage() {
   const validatedCount = participants.filter((p) => p.consent_status === "consented").length;
   const analyzedCount = metrics?.analyzed_participants || participants.filter((p) => p.status === "analyzed").length;
   const awaitingAnalysis = Math.max(0, totalRegistered - analyzedCount);
-  const eligiblePairs = run?.total_eligible_pairs || 300;
+  const theoreticalPairs = totalRegistered > 1 ? Math.floor((totalRegistered * (totalRegistered - 1)) / 2) : 0;
+  const eligiblePairs = run?.total_eligible_pairs ?? theoreticalPairs;
   const completedSessions = metrics?.completed_sessions || 0;
   const failedSessions = metrics?.failed_sessions || 0;
   const datasetPercent = run?.status === "completed" ? 100 : Math.min(100, Math.round((completedSessions / Math.max(eligiblePairs, 1)) * 100));

@@ -1,32 +1,53 @@
 import os
-from typing import List
+from typing import List, Union
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "Agentic Dating Platform"
+    PROJECT_NAME: str = "AuraMatch AI — Agentic Dating Platform"
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     
     # Database
-    DATABASE_URL: str = "sqlite:///./dating.db"
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./dating.db")
     
-    # CORS
+    # Admin Security
+    ADMIN_API_KEY: str = os.getenv("ADMIN_API_KEY", "dev-admin-secret-key")
+    
+    # CORS: Explicit allowed origins (never wildcard in production)
     BACKEND_CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
     ]
+
+    @field_validator("BACKEND_CORS_ORIGINS", mode="before")
+    @classmethod
+    def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
+        if isinstance(v, str) and not v.startswith("["):
+            return [i.strip() for i in v.split(",") if i.strip()]
+        elif isinstance(v, (list, str)):
+            return v
+        return [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+        ]
     
     # LLM Configuration
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", os.getenv("GOOGLE_API_KEY", ""))
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "gemini")
+    # "gemini" for live Google Gemini calls; "offline_mock" strictly for offline tests
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "gemini" if (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")) else "offline_mock")
     
     # Dating Simulation Parameters
     MAX_CONVERSATION_TURNS: int = 8
     DEFAULT_TOKEN_BUDGET: int = 4000
     REQUEST_TIMEOUT_SECONDS: int = 30
+    MODEL_TIMEOUT_SECONDS: int = 25
     
     # Ranking Weights (Provisional & Configurable)
     WEIGHT_PREFERENCES: float = 0.25

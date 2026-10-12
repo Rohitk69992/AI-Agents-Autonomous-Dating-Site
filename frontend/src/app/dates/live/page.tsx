@@ -91,7 +91,7 @@ export default function LiveDatingSimulationPage() {
             >
               {participants.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name} ({p.location || "California"})
+                  {p.name} ({p.location || "California"}) {p.is_synthetic ? "• Synthetic" : "• Verified"}
                 </option>
               ))}
             </select>
@@ -116,7 +116,7 @@ export default function LiveDatingSimulationPage() {
             >
               {participants.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name} ({p.location || "California"})
+                  {p.name} ({p.location || "California"}) {p.is_synthetic ? "• Synthetic" : "• Verified"}
                 </option>
               ))}
             </select>
@@ -191,6 +191,15 @@ export default function LiveDatingSimulationPage() {
                 <h2 className="text-lg font-bold text-white capitalize">
                   Outcome: {session.outcome_status?.replace(/_/g, " ")}
                 </h2>
+                {session.is_synthetic ? (
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30">
+                    SYNTHETIC SESSION
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/30">
+                    VERIFIED PARTICIPANTS
+                  </span>
+                )}
               </div>
               <div className="flex items-center space-x-3 text-xs font-mono text-slate-300">
                 <span>Engagement: {Math.round(session.mutual_engagement_score * 100)}%</span>
@@ -255,22 +264,33 @@ export default function LiveDatingSimulationPage() {
                         </div>
                       )}
 
-                      {/* Expandable Agent Thought Button */}
-                      {msg.internal_thought && (
+                      {/* Expandable Agent Decision Strategy */}
+                      {(msg.decision_summary || msg.internal_thought) && (
                         <div className="pt-1">
                           <button
                             onClick={() => toggleThought(msg.turn_number)}
                             className="inline-flex items-center space-x-1.5 text-[10px] text-slate-400 hover:text-pink-300 font-mono transition-colors"
                           >
                             <Brain className="w-3 h-3 text-pink-400" />
-                            <span>{isThoughtOpen ? "Hide Agent Reasoning" : "Inspect Agent Internal Reasoning"}</span>
+                            <span>{isThoughtOpen ? "Hide Decision Factors" : "Inspect Decision Strategy"}</span>
                           </button>
                           {isThoughtOpen && (
-                            <div className="mt-2 p-3 rounded-lg bg-slate-950/80 border border-slate-800 text-[11px] font-mono text-slate-300 space-y-1">
+                            <div className="mt-2 p-3 rounded-lg bg-slate-950/80 border border-slate-800 text-[11px] font-mono text-slate-300 space-y-1.5">
                               <span className="text-[10px] uppercase font-bold text-pink-400 block tracking-wider">
-                                Observable Decision Reasoning:
+                                Observable Decision Factors:
                               </span>
-                              <p className="italic">{msg.internal_thought}</p>
+                              <p className="leading-relaxed text-slate-200">
+                                {msg.decision_summary || msg.internal_thought}
+                              </p>
+                              {msg.decision_factors && msg.decision_factors.length > 0 && (
+                                <div className="flex flex-wrap gap-1 pt-1">
+                                  {msg.decision_factors.map((f: string, fi: number) => (
+                                    <span key={fi} className="px-1.5 py-0.5 rounded bg-slate-800 text-[9px] text-slate-300 border border-slate-700">
+                                      {f}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>

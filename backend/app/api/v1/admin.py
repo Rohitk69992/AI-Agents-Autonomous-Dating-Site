@@ -11,6 +11,7 @@ from app.schemas.admin import (
     HealthResponse, AdminConfigResponse, UpdateConfigAdminRequest, ObservabilityMetricsResponse
 )
 from app.core.config import settings
+from app.core.security import require_admin_auth
 
 router = APIRouter(tags=["Admin & Observability"])
 
@@ -58,7 +59,10 @@ def get_admin_config():
     )
 
 @router.post("/admin/config", response_model=AdminConfigResponse)
-def update_admin_config(req: UpdateConfigAdminRequest):
+def update_admin_config(
+    req: UpdateConfigAdminRequest,
+    _: bool = Depends(require_admin_auth)
+):
     if req.llm_provider:
         settings.LLM_PROVIDER = req.llm_provider
     if req.gemini_model:
@@ -97,7 +101,10 @@ def get_observability_metrics(db: Session = Depends(get_db)):
     )
 
 @router.post("/admin/seed-demo")
-def trigger_seed_demo(db: Session = Depends(get_db)):
+def trigger_seed_demo(
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_admin_auth)
+):
     from app.db.seed_demo import seed_database
     try:
         seed_database(db=db, run_simulation=True)

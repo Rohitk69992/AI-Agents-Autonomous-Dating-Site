@@ -7,6 +7,7 @@ from app.db.seed_demo import seed_database
 
 @pytest.fixture(scope="session")
 def client():
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     seed_database(run_simulation=True)
     with TestClient(app) as c:

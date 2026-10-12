@@ -17,6 +17,8 @@ TURN_SCHEMA = {
     "type": "object",
     "properties": {
         "internal_thought": {"type": "string"},
+        "decision_summary": {"type": "string"},
+        "decision_factors": {"type": "array", "items": {"type": "string"}},
         "message": {"type": "string"},
         "question_asked": {"type": "string"},
         "interest_referenced": {"type": "string"}
@@ -106,6 +108,7 @@ def execute_dating_session(
         return session
 
     session.status = "in_progress"
+    session.is_synthetic = bool(getattr(p_a, "is_synthetic", False) or getattr(p_b, "is_synthetic", False))
     session.total_turns = max_turns
     session.agent_a_objective = f"Discover authentic compatibility with {p_b.name}, explore shared lifestyle & personal passions."
     session.agent_b_objective = f"Get to know {p_a.name}, test mutual rapport and communication comfort."
@@ -165,6 +168,8 @@ Generate your internal thought, spoken response to {other_participant.name}, and
 
         data = response.structured_data
         internal_thought = data.get("internal_thought", "Thinking through how to respond...")
+        decision_summary = data.get("decision_summary") or internal_thought[:140]
+        decision_factors = data.get("decision_factors") or ([data.get("interest_referenced")] if data.get("interest_referenced") else [])
         message_content = data.get("message", response.content)
         question_asked = data.get("question_asked")
         interest_ref = data.get("interest_referenced")
@@ -175,6 +180,8 @@ Generate your internal thought, spoken response to {other_participant.name}, and
             sender_participant_id=curr_participant.id,
             sender_agent_role=role_label,
             content=message_content,
+            decision_summary=decision_summary,
+            decision_factors=decision_factors,
             internal_thought=internal_thought,
             question_asked=question_asked,
             interest_referenced=interest_ref,

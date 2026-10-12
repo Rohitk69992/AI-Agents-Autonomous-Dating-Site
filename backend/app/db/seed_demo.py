@@ -427,7 +427,12 @@ def seed_database(db: Session = None, run_simulation: bool = True):
                     instagram_handle=ig_handle,
                     consent_status="consented",
                     consent_timestamp=datetime.datetime.utcnow(),
-                    status="pending"
+                    consent_verified=False,
+                    source_verified=False,
+                    is_synthetic=True,
+                    simulation_eligible=True,
+                    status="pending",
+                    analysis_status="analyzed"
                 )
                 db.add(p)
                 db.commit()
@@ -443,6 +448,8 @@ def seed_database(db: Session = None, run_simulation: bool = True):
                         evidence_type=ev["type"],
                         raw_quote=ev["quote"],
                         confidence=ev.get("confidence", 1.0),
+                        is_synthetic=True,
+                        processing_version="1.0.0",
                         retrieved_at=datetime.datetime.utcnow()
                     )
                     db.add(item)
@@ -456,13 +463,13 @@ def seed_database(db: Session = None, run_simulation: bool = True):
 
         logger.info(f"Successfully processed {len(participant_objs)} participants.")
 
-        # Initialize official demonstration run
+        # Initialize synthetic benchmark demonstration run
         run_id = "demo-run-25-participants"
         demo_run = db.query(DemonstrationRun).filter(DemonstrationRun.id == run_id).first()
         if not demo_run:
             demo_run = DemonstrationRun(
                 id=run_id,
-                name="Official 25-Participant Consenting Demonstration",
+                name="Synthetic Benchmark & Development Fixture Run (25 Fixtures)",
                 status="pending",
                 total_participants=len(participant_objs),
                 started_at=datetime.datetime.utcnow()
@@ -500,6 +507,7 @@ def seed_database(db: Session = None, run_simulation: bool = True):
                         participant_a_id=p_a.id,
                         participant_b_id=p_b.id,
                         is_eligible=eligible,
+                        is_synthetic=True,
                         ineligibility_reason=inelig_reason,
                         pair_status="pending" if eligible else "skipped"
                     )
@@ -523,6 +531,7 @@ def seed_database(db: Session = None, run_simulation: bool = True):
                         run_id=run_id,
                         participant_a_id=pair.participant_a_id,
                         participant_b_id=pair.participant_b_id,
+                        is_synthetic=True,
                         status="initialized"
                     )
                     db.add(session)
