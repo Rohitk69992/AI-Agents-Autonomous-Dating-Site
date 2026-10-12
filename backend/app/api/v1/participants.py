@@ -2,6 +2,7 @@ import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
 from app.db.session import get_db
 from app.db.models import (
@@ -245,7 +246,15 @@ def list_participants(
 ):
     query = db.query(Participant)
     if search:
-        query = query.filter(Participant.name.ilike(f"%{search}%"))
+        search_pattern = f"%{search}%"
+        query = query.filter(
+            or_(
+                Participant.name.ilike(search_pattern),
+                Participant.location.ilike(search_pattern),
+                Participant.linkedin_handle.ilike(search_pattern),
+                Participant.instagram_handle.ilike(search_pattern)
+            )
+        )
     if status_filter:
         query = query.filter(Participant.status == status_filter)
 

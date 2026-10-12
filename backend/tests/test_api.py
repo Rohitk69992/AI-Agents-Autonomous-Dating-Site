@@ -58,9 +58,12 @@ def test_compatibility_rankings_deterministic(client):
 
 def test_ingest_duplicate_rejection(client):
     # Attempting to re-ingest an existing LinkedIn URL must return 409 Conflict
+    parts = client.get("/api/v1/participants").json()
+    assert len(parts) > 0
+    existing_li = parts[0]["linkedin_url"]
     payload = {
         "name": "Duplicate Test",
-        "linkedin_url": "https://www.linkedin.com/in/elena-rostova-ai",
+        "linkedin_url": existing_li,
         "instagram_url": "https://www.instagram.com/brand_new_handle_123",
         "consent_confirmed": True
     }
